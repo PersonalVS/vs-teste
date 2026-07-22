@@ -5117,7 +5117,12 @@ async function doUpdatePassword() {
 
 async function doSignOut() {
   if (!confirm('Sair da sua conta neste dispositivo?')) return;
+  // Limpa TUDO da memória e do armazenamento local antes de sair — sem
+  // isso, se outra conta fizer login neste mesmo navegador em seguida,
+  // ela poderia herdar visualmente dados que sobraram desta conta.
   await sb.auth.signOut();
+  localStorage.clear();
+  location.reload();
 }
 
 // Troca de e-mail: Supabase envia confirmação para o e-mail NOVO (e opcionalmente
@@ -5175,6 +5180,7 @@ async function doDeleteAccountFull() {
     localStorage.clear();
     toast('✅ Sua conta foi excluída permanentemente.');
     await sb.auth.signOut();
+    setTimeout(() => location.reload(), 1200);
   } catch(e) {
     toast('❌ ' + e.message);
   }
@@ -5232,10 +5238,26 @@ async function sbPull() {
     // RLS já filtra pelo usuário logado; o .eq abaixo é só clareza/performance extra.
     const { data, error } = await sb.from('students').select('data').eq('user_id', currentUser.id).order('updated_at', { ascending: false });
     if (error) throw new Error(error.message);
-    if (data && data.length > 0) {
-      students = data.map(r => r.data);
-      setLocalNoSync('fp_v6', JSON.stringify(students));
-    }
+    // IMPORTANTE: sempre substitui pelo que veio da nuvem, mesmo vazio.
+    // Uma conta nova/recém-trocada com 0 alunos na nuvem significa que a
+    // lista local também deve ficar vazia — nunca manter o que sobrou de
+    // uma conta anterior na memória do navegador.
+    students = (data || []).map(r => r.data);
+    setLocalNoSync('fp_v6', JSON.stringify(students));
+
+    // Reseta o cache em memória ANTES de aplicar o que vier da nuvem —
+    // evita que dado de uma conta anterior (ainda na memória) apareça
+    // pra conta que acabou de logar, caso essa conta não tenha aquela
+    // chave específica salva ainda.
+    SYNC_KEYS.forEach(key => localStorage.removeItem(key));
+    attendanceData = {};
+    scheduleData = {};
+    faltaMotivos = {};
+    aulasARepor = [];
+    listaEspera = [];
+    notasRapidas = [];
+    apresentacaoSlides = APRESENTACAO_DEFAULT;
+
     const { data: extras } = await sb.from('app_data').select('key,value').eq('user_id', currentUser.id);
     if (extras) {
       extras.forEach(r => {
