@@ -1182,6 +1182,10 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
       </div>
       <div class="caps-warning" id="auth-signup-caps">⇪ Caps Lock está ativado</div>
     </div>
+    <div class="form-group" style="display:flex;align-items:flex-start;gap:9px;margin-top:2px">
+      <input type="checkbox" id="auth-signup-termos" style="margin-top:3px;flex-shrink:0;width:17px;height:17px;accent-color:var(--accent)"/>
+      <label for="auth-signup-termos" style="font-size:12px;color:var(--text2);line-height:1.55">Li e concordo com os <a href="termos.html" target="_blank" style="color:var(--accent);font-weight:600">Termos de Uso</a> e a <a href="privacidade.html" target="_blank" style="color:var(--accent);font-weight:600">Política de Privacidade</a>.</label>
+    </div>
     <button class="btn btn-primary btn-full" style="padding:15px" onclick="doSignUp()"><span id="auth-signup-txt">Criar minha conta</span></button>
     <div style="font-size:11px;color:var(--text3);text-align:center;line-height:1.6">Ao criar sua conta, seu espaço de dados é criado automaticamente — nada pra configurar.</div>
     <div class="auth-switch">Já tem conta? <a onclick="authShow('login')">Entrar</a></div>
@@ -1210,6 +1214,10 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
       <div class="caps-warning" id="auth-reset-caps">⇪ Caps Lock está ativado</div>
     </div>
     <button class="btn btn-primary btn-full" style="padding:15px" onclick="doUpdatePassword()"><span id="auth-reset-txt">Salvar nova senha</span></button>
+  </div>
+
+  <div style="text-align:center;margin-top:26px;font-size:11px;color:var(--text3)">
+    <a href="termos.html" target="_blank" style="color:var(--text3)">Termos de Uso</a> · <a href="privacidade.html" target="_blank" style="color:var(--text3)">Política de Privacidade</a>
   </div>
 </div>
 
@@ -5064,14 +5072,18 @@ async function doSignUp() {
   const nome = document.getElementById('auth-signup-nome').value.trim();
   const email = document.getElementById('auth-signup-email').value.trim();
   const senha = document.getElementById('auth-signup-senha').value;
+  const aceitouTermos = document.getElementById('auth-signup-termos').checked;
   if (!nome || !email || !senha) { authErr('signup', 'Preencha nome, e-mail e senha.'); return; }
   if (senha.length < 6) { authErr('signup', 'A senha precisa ter pelo menos 6 caracteres.'); return; }
+  if (!aceitouTermos) { authErr('signup', 'Você precisa aceitar os Termos de Uso e a Política de Privacidade para criar sua conta.'); return; }
   const btn = document.getElementById('auth-signup-txt');
   btn.textContent = 'Criando conta...';
   try {
     const { data, error } = await sb.auth.signUp({
       email, password: senha,
-      options: { data: { nome } }
+      // Registra nome e o momento exato do aceite dos termos — evidência
+      // de consentimento, útil caso precise comprovar isso no futuro.
+      options: { data: { nome, termos_aceitos_em: new Date().toISOString() } }
     });
     if (error) throw error;
     if (data.session) {
