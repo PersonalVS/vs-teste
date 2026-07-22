@@ -1595,8 +1595,8 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
 
       <div class="card" style="background:rgba(255,70,70,.06);border-color:rgba(255,70,70,.25)">
         <div class="card-title" style="color:#ff6b6b">⚠️ Excluir conta</div>
-        <div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:10px">Apaga permanentemente todos os seus alunos e dados da nuvem. Não pode ser desfeito.</div>
-        <button class="btn btn-full" style="background:rgba(255,70,70,.12);border:1px solid rgba(255,70,70,.4);color:#ff6b6b" onclick="doDeleteAccountData()">🗑️ Excluir meus dados</button>
+        <div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:10px">Apaga permanentemente sua conta (login), todos os seus alunos e dados da nuvem. Não pode ser desfeito.</div>
+        <button class="btn btn-full" style="background:rgba(255,70,70,.12);border:1px solid rgba(255,70,70,.4);color:#ff6b6b" onclick="doDeleteAccountData()">🗑️ Excluir minha conta</button>
       </div>
 
       <div class="card" style="margin-top:13px">
@@ -5190,25 +5190,37 @@ async function doChangePasswordLogged() {
 // na prática) e avisamos sobre o passo restante — ver nota na Etapa 4 do plano.
 async function doDeleteAccountData() {
   if (!currentUser) return;
-  const conf = prompt('Isso vai apagar TODOS os seus alunos e dados da nuvem, permanentemente. Digite EXCLUIR para confirmar:');
+  const conf = prompt('Isso vai apagar sua conta e TODOS os seus alunos e dados, permanentemente. Digite EXCLUIR para confirmar:');
   if (conf !== 'EXCLUIR') return;
+  toast('🗑️ Excluindo sua conta...');
   try {
-    await sb.from('students').delete().eq('user_id', currentUser.id);
-    await sb.from('app_data').delete().eq('user_id', currentUser.id);
-    students = [];
-    attendanceData = {};
-    scheduleData = {};
-    faltaMotivos = {};
-    aulasARepor = [];
-    listaEspera = [];
-    notasRapidas = [];
-    apresentacaoSlides = APRESENTACAO_DEFAULT;
-    localStorage.clear();
-    toast('✅ Seus dados foram apagados.');
-    await sb.auth.signOut();
+    // Edge Function apaga o login de verdade (auth.users) além dos dados —
+    // é a única forma segura de fazer isso (exige privilégio de admin,
+    // que nunca pode ficar no navegador).
+    const { data, error } = await sb.functions.invoke('delete-account', { method: 'POST' });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
   } catch(e) {
-    toast('❌ ' + e.message);
+    // Se a Edge Function ainda não foi publicada (ou falhar por qualquer
+    // motivo), pelo menos os DADOS são apagados — a pessoa não fica
+    // "presa" com uma conta que não consegue excluir.
+    dbg('delete-account edge function falhou, apagando só os dados: ' + e.message);
+    try {
+      await sb.from('students').delete().eq('user_id', currentUser.id);
+      await sb.from('app_data').delete().eq('user_id', currentUser.id);
+    } catch(e2) { toast('❌ ' + e2.message); return; }
   }
+  students = [];
+  attendanceData = {};
+  scheduleData = {};
+  faltaMotivos = {};
+  aulasARepor = [];
+  listaEspera = [];
+  notasRapidas = [];
+  apresentacaoSlides = APRESENTACAO_DEFAULT;
+  localStorage.clear();
+  toast('✅ Sua conta e seus dados foram apagados.');
+  await sb.auth.signOut();
 }
 
 // ══════════════════════════════════════════
