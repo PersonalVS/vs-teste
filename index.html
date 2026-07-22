@@ -106,12 +106,16 @@ localStorage.setItem = function(key, value) {
 };
 
 // Força o envio imediato de tudo que ainda está "esperando" o debounce
-// — chamado ao esconder/fechar a aba, pra não perder a última edição.
+// — chamado ao esconder/fechar a aba, ou antes de sair da conta, pra
+// nunca perder a última edição. Retorna uma Promise que só resolve
+// quando TODOS os envios pendentes tiverem terminado.
 function flushAllPendingSync() {
-  Object.keys(_syncTimers).forEach(key => {
+  const keys = Object.keys(_syncTimers);
+  const promises = keys.map(key => {
     clearTimeout(_syncTimers[key]);
-    if (key === '__students__') flushStudentsSync(); else flushSyncKey(key);
+    return key === '__students__' ? flushStudentsSync() : flushSyncKey(key);
   });
+  return Promise.all(promises);
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushAllPendingSync();
@@ -5117,9 +5121,11 @@ async function doUpdatePassword() {
 
 async function doSignOut() {
   if (!confirm('Sair da sua conta neste dispositivo?')) return;
-  // Limpa TUDO da memória e do armazenamento local antes de sair — sem
-  // isso, se outra conta fizer login neste mesmo navegador em seguida,
-  // ela poderia herdar visualmente dados que sobraram desta conta.
+  // ORDEM IMPORTA: precisa enviar o que estiver pendente ANTES de sair —
+  // depois do signOut(), a sessão morre e o envio pra nuvem passa a falhar
+  // (o banco exige estar logado pra escrever). Por isso o await aqui.
+  toast('☁️ Salvando alterações pendentes...');
+  try { await flushAllPendingSync(); } catch(e) { /* segue mesmo se algo falhar, não trava o logout */ }
   await sb.auth.signOut();
   localStorage.clear();
   location.reload();
