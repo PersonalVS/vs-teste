@@ -1570,8 +1570,8 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
 
       <div class="card" style="background:rgba(255,70,70,.06);border-color:rgba(255,70,70,.25)">
         <div class="card-title" style="color:#ff6b6b">⚠️ Excluir conta</div>
-        <div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:10px">Apaga permanentemente todos os seus alunos e dados da nuvem. Não pode ser desfeito.</div>
-        <button class="btn btn-full" style="background:rgba(255,70,70,.12);border:1px solid rgba(255,70,70,.4);color:#ff6b6b" onclick="doDeleteAccountData()">🗑️ Excluir meus dados</button>
+        <div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:10px">Apaga permanentemente sua conta (login) e todos os seus alunos e dados da nuvem. Não pode ser desfeito.</div>
+        <button class="btn btn-full" style="background:rgba(255,70,70,.12);border:1px solid rgba(255,70,70,.4);color:#ff6b6b" onclick="doDeleteAccountFull()">🗑️ Excluir minha conta</button>
       </div>
 
       <div class="card" style="margin-top:13px">
@@ -5147,22 +5147,33 @@ async function doChangePasswordLogged() {
   }
 }
 
-// Cancelar conta: apagar o USUÁRIO (auth.users) exige privilégio de administrador
-// (service role), que nunca deve ficar exposto no app do navegador. Por isso,
-// aqui apagamos todos os DADOS do usuário (o que já cumpre "excluir minha conta"
-// na prática) e avisamos sobre o passo restante — ver nota na Etapa 4 do plano.
-async function doDeleteAccountData() {
+// Cancelar conta por completo: chama a Edge Function "delete-account"
+// (rodando no servidor do Supabase), que apaga o login em si (auth.users)
+// além de todos os dados — usando a service role key, que fica só lá,
+// nunca aqui no navegador.
+async function doDeleteAccountFull() {
   if (!currentUser) return;
-  const conf = prompt('Isso vai apagar TODOS os seus alunos e dados da nuvem, permanentemente. Digite EXCLUIR para confirmar:');
+  const conf = prompt('Isso vai apagar sua CONTA (login) e TODOS os seus alunos e dados da nuvem, PERMANENTEMENTE. Não pode ser desfeito. Digite EXCLUIR para confirmar:');
   if (conf !== 'EXCLUIR') return;
+  toast('🗑️ Excluindo conta...');
   try {
-    await sb.from('students').delete().eq('user_id', currentUser.id);
-    await sb.from('app_data').delete().eq('user_id', currentUser.id);
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) throw new Error('Sessão expirada — faça login novamente');
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/delete-account`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json',
+      },
+    });
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || 'Falha ao excluir conta');
     students = [];
     attendanceData = {};
     scheduleData = {};
     localStorage.clear();
-    toast('✅ Seus dados foram apagados.');
+    toast('✅ Sua conta foi excluída permanentemente.');
     await sb.auth.signOut();
   } catch(e) {
     toast('❌ ' + e.message);
