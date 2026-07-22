@@ -15,6 +15,123 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
 });
 let currentUser = null; // preenchido depois do login
+
+// ══════════════════════════════════════════════════════════════
+// SYNC AUTOMÁTICO (debounced) — Etapa 2
+// ══════════════════════════════════════════════════════════════
+// Registro central: toda chave do localStorage listada aqui passa a
+// ser espelhada sozinha na nuvem (tabela app_data) sempre que muda.
+// 'fp_v6' (alunos) é tratado à parte, porque vira várias linhas na
+// tabela `students`, não uma linha só em `app_data`.
+// Ficam de fora de propósito: fp_pin/fp_pin_skip (trava é por
+// aparelho, não deve viajar pra outros dispositivos) e fp_theme
+// (preferência visual, sem valor sincronizar).
+const SYNC_KEYS = new Set([
+  'fp_attendance', 'fp_schedule', 'fp_notas_rapidas', 'fp_aulas_repor',
+  'fp_falta_motivos', 'fp_lista_espera', 'fp_horario_trabalho',
+  'fp_mvp_fases', 'fp_apresentacao', 'fp_dash_hist',
+  'fp_cartao_nome', 'fp_cartao_tagline', 'fp_cartao_tema',
+  'fp_cartao_contato', 'fp_cartao_logo_custom',
+]);
+
+const _syncTimers = {};
+const SYNC_DEBOUNCE_MS = 1500;
+
+// Grava no localStorage SEM disparar sincronização — usado quando o
+// próprio dado já veio da nuvem (evita ping-pong de sync inútil).
+function setLocalNoSync(key, value) {
+  _originalSetItem(key, value);
+}
+
+function queueSync(key) {
+  if (key === 'fp_v6') { queueStudentsSync(); return; }
+  if (!SYNC_KEYS.has(key)) return;
+  if (!currentUser) return; // sem login, não há onde sincronizar ainda
+  updateSyncIndicator('pending');
+  clearTimeout(_syncTimers[key]);
+  _syncTimers[key] = setTimeout(() => flushSyncKey(key), SYNC_DEBOUNCE_MS);
+}
+
+async function flushSyncKey(key) {
+  if (!currentUser) return;
+  const raw = localStorage.getItem(key);
+  let value = null;
+  try { value = raw === null ? null : JSON.parse(raw); } catch(e) { value = raw; }
+  updateSyncIndicator('syncing');
+  try {
+    const { error } = await sb.from('app_data').upsert(
+      { key, user_id: currentUser.id, value, updated_at: new Date().toISOString() }
+    );
+    if (error) throw new Error(error.message);
+    updateSyncIndicator('ok');
+  } catch(e) {
+    updateSyncIndicator('error');
+    // tenta de novo em breve — não perde a alteração silenciosamente
+    clearTimeout(_syncTimers[key]);
+    _syncTimers[key] = setTimeout(() => flushSyncKey(key), 8000);
+  }
+}
+
+function queueStudentsSync() {
+  if (!currentUser) return;
+  updateSyncIndicator('pending');
+  clearTimeout(_syncTimers.__students__);
+  _syncTimers.__students__ = setTimeout(flushStudentsSync, SYNC_DEBOUNCE_MS);
+}
+
+async function flushStudentsSync() {
+  if (!currentUser) return;
+  updateSyncIndicator('syncing');
+  try {
+    for (const s of students) {
+      const { error } = await sb.from('students').upsert({ id: s.id, user_id: currentUser.id, data: s, updated_at: new Date().toISOString() });
+      if (error) throw new Error(error.message);
+    }
+    updateSyncIndicator('ok');
+  } catch(e) {
+    updateSyncIndicator('error');
+    clearTimeout(_syncTimers.__students__);
+    _syncTimers.__students__ = setTimeout(flushStudentsSync, 8000);
+  }
+}
+
+// Intercepta TODO localStorage.setItem do app. Assim, qualquer função
+// de salvar que já existe (e qualquer uma nova que vier no futuro)
+// passa a sincronizar com a nuvem sozinha, sem precisar mexer em
+// cada função uma por uma.
+const _originalSetItem = localStorage.setItem.bind(localStorage);
+localStorage.setItem = function(key, value) {
+  _originalSetItem(key, value);
+  queueSync(key);
+};
+
+// Força o envio imediato de tudo que ainda está "esperando" o debounce
+// — chamado ao esconder/fechar a aba, pra não perder a última edição.
+function flushAllPendingSync() {
+  Object.keys(_syncTimers).forEach(key => {
+    clearTimeout(_syncTimers[key]);
+    if (key === '__students__') flushStudentsSync(); else flushSyncKey(key);
+  });
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushAllPendingSync();
+});
+window.addEventListener('beforeunload', flushAllPendingSync);
+
+// Pequeno indicador visual (topbar) do estado da sincronização.
+function updateSyncIndicator(state) {
+  const el = document.getElementById('sync-indicator');
+  if (!el) return;
+  const map = {
+    pending: { icon: '☁️', title: 'Alterações aguardando envio…' },
+    syncing: { icon: '🔄', title: 'Sincronizando com a nuvem…' },
+    ok:      { icon: '✅', title: 'Tudo sincronizado' },
+    error:   { icon: '⚠️', title: 'Falha ao sincronizar — tentando de novo' },
+  };
+  const s = map[state] || map.ok;
+  el.textContent = s.icon;
+  el.title = s.title;
+}
 </script>
 <script>
 // ══════════════════════════════════════════════════════════════
@@ -682,6 +799,11 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
 .form-label{font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:6px}
 .form-input,.form-select,.form-textarea{width:100%;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;color:var(--text);font-size:15px;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s;appearance:none}
 .form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--accent)}
+.pw-wrap{position:relative}
+.pw-wrap .form-input{padding-right:44px}
+.pw-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;font-size:17px;color:var(--text3);padding:0}
+.caps-warning{display:none;align-items:center;gap:5px;font-size:11px;color:var(--orange);margin-top:6px;line-height:1.4}
+.caps-warning.show{display:flex}
 .form-textarea{resize:none;height:65px}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 .form-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
@@ -1009,7 +1131,14 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
   <div class="auth-panel active" id="auth-panel-login">
     <div class="auth-error" id="auth-login-error"></div>
     <div class="form-group"><label class="form-label">E-mail</label><input class="form-input" id="auth-login-email" type="email" placeholder="voce@email.com" autocomplete="email"/></div>
-    <div class="form-group"><label class="form-label">Senha</label><input class="form-input" id="auth-login-senha" type="password" placeholder="••••••••" autocomplete="current-password"/></div>
+    <div class="form-group">
+      <label class="form-label">Senha</label>
+      <div class="pw-wrap">
+        <input class="form-input" id="auth-login-senha" type="password" placeholder="••••••••" autocomplete="current-password" onkeyup="checkCapsLock(event,'auth-login-caps')" onkeydown="checkCapsLock(event,'auth-login-caps')"/>
+        <button type="button" class="pw-eye" onclick="togglePwVisibility('auth-login-senha', this)" title="Mostrar/ocultar senha">👁️</button>
+      </div>
+      <div class="caps-warning" id="auth-login-caps">⇪ Caps Lock está ativado</div>
+    </div>
     <button class="btn btn-primary btn-full" style="padding:15px" onclick="doSignIn()"><span id="auth-login-txt">Entrar</span></button>
     <div style="text-align:right"><a style="font-size:12px;color:var(--accent);cursor:pointer" onclick="authShow('forgot')">Esqueci minha senha</a></div>
     <div class="auth-switch">Não tem conta? <a onclick="authShow('signup')">Criar conta grátis</a></div>
@@ -1020,7 +1149,14 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
     <div class="auth-error" id="auth-signup-error"></div>
     <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="auth-signup-nome" placeholder="Seu nome"/></div>
     <div class="form-group"><label class="form-label">E-mail</label><input class="form-input" id="auth-signup-email" type="email" placeholder="voce@email.com" autocomplete="email"/></div>
-    <div class="form-group"><label class="form-label">Senha</label><input class="form-input" id="auth-signup-senha" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password"/></div>
+    <div class="form-group">
+      <label class="form-label">Senha</label>
+      <div class="pw-wrap">
+        <input class="form-input" id="auth-signup-senha" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" onkeyup="checkCapsLock(event,'auth-signup-caps')" onkeydown="checkCapsLock(event,'auth-signup-caps')"/>
+        <button type="button" class="pw-eye" onclick="togglePwVisibility('auth-signup-senha', this)" title="Mostrar/ocultar senha">👁️</button>
+      </div>
+      <div class="caps-warning" id="auth-signup-caps">⇪ Caps Lock está ativado</div>
+    </div>
     <button class="btn btn-primary btn-full" style="padding:15px" onclick="doSignUp()"><span id="auth-signup-txt">Criar minha conta</span></button>
     <div style="font-size:11px;color:var(--text3);text-align:center;line-height:1.6">Ao criar sua conta, seu espaço de dados é criado automaticamente — nada pra configurar.</div>
     <div class="auth-switch">Já tem conta? <a onclick="authShow('login')">Entrar</a></div>
@@ -1040,7 +1176,14 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
   <div class="auth-panel" id="auth-panel-reset">
     <div class="auth-error" id="auth-reset-error"></div>
     <div style="font-size:13px;color:var(--text2);margin-bottom:4px">Escolha sua nova senha.</div>
-    <div class="form-group"><label class="form-label">Nova senha</label><input class="form-input" id="auth-reset-senha" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password"/></div>
+    <div class="form-group">
+      <label class="form-label">Nova senha</label>
+      <div class="pw-wrap">
+        <input class="form-input" id="auth-reset-senha" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" onkeyup="checkCapsLock(event,'auth-reset-caps')" onkeydown="checkCapsLock(event,'auth-reset-caps')"/>
+        <button type="button" class="pw-eye" onclick="togglePwVisibility('auth-reset-senha', this)" title="Mostrar/ocultar senha">👁️</button>
+      </div>
+      <div class="caps-warning" id="auth-reset-caps">⇪ Caps Lock está ativado</div>
+    </div>
     <button class="btn btn-primary btn-full" style="padding:15px" onclick="doUpdatePassword()"><span id="auth-reset-txt">Salvar nova senha</span></button>
   </div>
 </div>
@@ -1051,6 +1194,7 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
     <div class="logo" style="display:flex;align-items:center;gap:6px"><img src="" id="topbar-logo-img" style="width:22px;height:22px;object-fit:contain"/>Personal<span>VS</span></div>
     <div id="top-title"></div>
     <div class="spacer"></div>
+    <div id="sync-indicator" onclick="showNav('supabase')" title="Tudo sincronizado" style="font-size:15px;cursor:pointer;margin-right:8px;opacity:.85">✅</div>
     <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Alternar tema">🌙</button>
   </div>
 
@@ -1408,7 +1552,8 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
 
       <div class="card" style="margin-bottom:13px">
         <div class="card-title">📦 Sincronização</div>
-        <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6">Suas alterações são enviadas pra nuvem sozinhas, poucos segundos depois de cada mudança. Os botões abaixo são só um reforço manual, se quiser forçar agora.</div>
+        <div style="display:flex;flex-direction:column;gap:12px">
           <button class="btn btn-primary btn-full" style="padding:16px;font-size:15px;font-weight:700;min-height:56px" onclick="sbPush()">☁️ ⬆️ SALVAR NA NUVEM</button>
           <button class="btn btn-outline btn-full" style="padding:16px;font-size:15px;min-height:56px" onclick="sbPull()">☁️ ⬇️ CARREGAR DA NUVEM</button>
         </div>
@@ -1974,10 +2119,9 @@ let currentPayStatus = 'ok';
 // ══════════════════════════════════════════
 function save() {
   localStorage.setItem('fp_v6', JSON.stringify(students));
-  if (currentUser && selectedStudentId) {
-    const s = students.find(x => x.id === selectedStudentId);
-    if (s) sb.from('students').upsert({ id: s.id, user_id: currentUser.id, data: s, updated_at: new Date().toISOString() }).then(() => {});
-  }
+  // A sincronização com a nuvem acontece sozinha (veja o interceptor
+  // de localStorage.setItem logo no topo do arquivo) — não precisa
+  // mais chamar nada manualmente aqui.
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 function toast(msg, d = 2200) {
@@ -4846,6 +4990,24 @@ function dbg(msg) {
 // AUTENTICAÇÃO — Supabase Auth (multiusuário)
 // ══════════════════════════════════════════
 
+function togglePwVisibility(inputId, btnEl) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const showing = input.type === 'text';
+  input.type = showing ? 'password' : 'text';
+  btnEl.textContent = showing ? '👁️' : '🙈';
+  btnEl.title = showing ? 'Mostrar senha' : 'Ocultar senha';
+}
+
+function checkCapsLock(event, warningId) {
+  const el = document.getElementById(warningId);
+  if (!el) return;
+  // getModifierState nem sempre existe (ex: alguns navegadores antigos/mobile) — some silenciosamente nesse caso
+  if (typeof event.getModifierState !== 'function') return;
+  const isOn = event.getModifierState('CapsLock');
+  el.classList.toggle('show', isOn);
+}
+
 function authShow(view) {
   ['login','signup','forgot','reset'].forEach(v => {
     document.getElementById('auth-panel-' + v).classList.toggle('active', v === view);
@@ -5035,21 +5197,21 @@ function sbStatusCard() {
 
 async function sbPush() {
   if (!currentUser) { toast('⚠️ Faça login primeiro'); return; }
-  dbg('sbPush chamado, students=' + students.length);
   toast('⬆️ Enviando...');
   try {
     for (const s of students) {
       const { error } = await sb.from('students').upsert({ id: s.id, user_id: currentUser.id, data: s, updated_at: new Date().toISOString() });
-      if (error) { dbg('ERRO upsert: ' + error.message); throw new Error(error.message); }
+      if (error) throw new Error(error.message);
     }
-    const { error: e2 } = await sb.from('app_data').upsert([
-      { key: 'attendance', user_id: currentUser.id, value: attendanceData, updated_at: new Date().toISOString() },
-      { key: 'schedule',   user_id: currentUser.id, value: scheduleData,   updated_at: new Date().toISOString() }
-    ]);
-    if (e2) { dbg('ERRO app_data: ' + e2.message); throw new Error(e2.message); }
-    dbg('SUCESSO!');
+    const rows = [...SYNC_KEYS].map(key => {
+      let value = null;
+      try { value = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e) { value = null; }
+      return { key, user_id: currentUser.id, value, updated_at: new Date().toISOString() };
+    });
+    const { error: e2 } = await sb.from('app_data').upsert(rows);
+    if (e2) throw new Error(e2.message);
     toast('✅ ' + students.length + ' aluno(s) salvos na nuvem!');
-  } catch(e) { dbg('CATCH: ' + e.message); toast('❌ ' + e.message); }
+  } catch(e) { toast('❌ ' + e.message); }
 }
 
 async function sbPull() {
@@ -5061,13 +5223,21 @@ async function sbPull() {
     if (error) throw new Error(error.message);
     if (data && data.length > 0) {
       students = data.map(r => r.data);
-      localStorage.setItem('fp_v6', JSON.stringify(students));
+      setLocalNoSync('fp_v6', JSON.stringify(students));
     }
     const { data: extras } = await sb.from('app_data').select('key,value').eq('user_id', currentUser.id);
     if (extras) {
       extras.forEach(r => {
-        if (r.key === 'attendance') { attendanceData = r.value; localStorage.setItem('fp_attendance', JSON.stringify(r.value)); }
-        if (r.key === 'schedule')   { scheduleData   = r.value; localStorage.setItem('fp_schedule',   JSON.stringify(r.value)); }
+        setLocalNoSync(r.key, JSON.stringify(r.value));
+        // Reatribui as variáveis em memória que têm cache próprio,
+        // pra tela já refletir o dado recém-chegado da nuvem.
+        if (r.key === 'fp_attendance')     attendanceData     = r.value;
+        if (r.key === 'fp_schedule')       scheduleData       = r.value;
+        if (r.key === 'fp_falta_motivos')  faltaMotivos       = r.value;
+        if (r.key === 'fp_aulas_repor')    aulasARepor        = r.value;
+        if (r.key === 'fp_lista_espera')   listaEspera        = r.value;
+        if (r.key === 'fp_notas_rapidas')  notasRapidas       = r.value;
+        if (r.key === 'fp_apresentacao')   apresentacaoSlides = r.value;
       });
     }
     renderHome();
@@ -5638,19 +5808,15 @@ function loadTagChips(tags) {
 // ══════════════════════════════════════════
 let _autoSyncInterval = null;
 
+// Rede de segurança: a cada poucos minutos, força uma reconciliação
+// completa — útil caso algum debounce tenha sido perdido (ex: o
+// navegador matou a aba antes do timer disparar).
 function startAutoSync() {
   if (_autoSyncInterval) clearInterval(_autoSyncInterval);
-  _autoSyncInterval = setInterval(async () => {
+  _autoSyncInterval = setInterval(() => {
     if (!currentUser || !students.length) return;
-    try {
-      for (const s of students) {
-        await sb.from('students').upsert({ id: s.id, user_id: currentUser.id, data: s, updated_at: new Date().toISOString() });
-      }
-      await sb.from('app_data').upsert([
-        { key: 'attendance', user_id: currentUser.id, value: attendanceData, updated_at: new Date().toISOString() },
-        { key: 'schedule',   user_id: currentUser.id, value: scheduleData,   updated_at: new Date().toISOString() }
-      ]);
-    } catch(e) { /* silencioso */ }
+    flushStudentsSync();
+    SYNC_KEYS.forEach(key => flushSyncKey(key));
   }, 5 * 60 * 1000);
 }
 
@@ -6120,6 +6286,7 @@ async function bootApp() {
     _appBooted = true;
     await sbPull();          // traz os dados do usuário logado da nuvem
   }
+  updateSyncIndicator('ok');
   renderHome();
   checkPaymentAlerts();
   pinInit();
