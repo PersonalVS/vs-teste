@@ -1,0 +1,20 @@
+name: Manter Supabase ativo
+
+# Roda automaticamente Domingo e Quarta às 06:00 (horário de Brasília),
+# e também pode ser disparado manualmente (aba "Actions" do repositório).
+# Duas vezes por semana é uma folga segura contra a pausa de 7 dias.
+on:
+  schedule:
+    - cron: '0 9 * * 0,3'   # 09:00 UTC = 06:00 em Brasília (UTC-3)
+  workflow_dispatch: {}
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar o banco (gera atividade real, não só um "ping" de rede)
+        run: |
+          curl -s -o /dev/null -w "Status: %{http_code}\n" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/students?select=id&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
