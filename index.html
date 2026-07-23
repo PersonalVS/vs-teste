@@ -4,6 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <meta name="theme-color" content="#17211c"/>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // ══════════════════════════════════════════════════════════════
@@ -1186,6 +1187,7 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
       <input type="checkbox" id="auth-signup-termos" style="margin-top:3px;flex-shrink:0;width:17px;height:17px;accent-color:var(--accent)"/>
       <label for="auth-signup-termos" style="font-size:12px;color:var(--text2);line-height:1.55">Li e concordo com os <a href="termos.html" target="_blank" style="color:var(--accent);font-weight:600">Termos de Uso</a> e a <a href="privacidade.html" target="_blank" style="color:var(--accent);font-weight:600">Política de Privacidade</a>.</label>
     </div>
+    <div class="cf-turnstile" id="turnstile-signup" data-sitekey="0x4AAAAAAD8SIAksGLICkVgG" data-callback="turnstileSignupOk" data-expired-callback="turnstileSignupReset" data-theme="dark" style="margin:2px 0"></div>
     <button class="btn btn-primary btn-full" style="padding:15px" onclick="doSignUp()"><span id="auth-signup-txt">Criar minha conta</span></button>
     <div style="font-size:11px;color:var(--text3);text-align:center;line-height:1.6">Ao criar sua conta, seu espaço de dados é criado automaticamente — nada pra configurar.</div>
     <div class="auth-switch">Já tem conta? <a onclick="authShow('login')">Entrar</a></div>
@@ -1197,6 +1199,7 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
     <div class="auth-ok" id="auth-forgot-ok"></div>
     <div style="font-size:13px;color:var(--text2);margin-bottom:4px">Digite seu e-mail e enviaremos um link para redefinir sua senha.</div>
     <div class="form-group"><label class="form-label">E-mail</label><input class="form-input" id="auth-forgot-email" type="email" placeholder="voce@email.com"/></div>
+    <div class="cf-turnstile" id="turnstile-forgot" data-sitekey="0x4AAAAAAD8SIAksGLICkVgG" data-callback="turnstileForgotOk" data-expired-callback="turnstileForgotReset" data-theme="dark" style="margin:2px 0"></div>
     <button class="btn btn-primary btn-full" style="padding:15px" onclick="doForgotPassword()"><span id="auth-forgot-txt">Enviar link de recuperação</span></button>
     <div class="auth-switch"><a onclick="authShow('login')">‹ Voltar para o login</a></div>
   </div>
@@ -5068,6 +5071,21 @@ function traduzErroAuth(msg) {
   return msg || 'Algo deu errado. Tente novamente.';
 }
 
+// ══════════════════════════════════════════
+// TURNSTILE (Cloudflare) — proteção contra bots no cadastro e na
+// recuperação de senha. O token só é válido uma vez, por isso
+// resetamos o widget depois de cada tentativa (deu certo ou não).
+// ══════════════════════════════════════════
+let _captchaTokenSignup = null;
+let _captchaTokenForgot = null;
+function turnstileSignupOk(token) { _captchaTokenSignup = token; }
+function turnstileSignupReset()   { _captchaTokenSignup = null; }
+function turnstileForgotOk(token) { _captchaTokenForgot = token; }
+function turnstileForgotReset()   { _captchaTokenForgot = null; }
+function resetTurnstile(widgetId) {
+  try { if (window.turnstile) turnstile.reset('#' + widgetId); } catch(e) {}
+}
+
 async function doSignUp() {
   const nome = document.getElementById('auth-signup-nome').value.trim();
   const email = document.getElementById('auth-signup-email').value.trim();
@@ -5076,6 +5094,7 @@ async function doSignUp() {
   if (!nome || !email || !senha) { authErr('signup', 'Preencha nome, e-mail e senha.'); return; }
   if (senha.length < 6) { authErr('signup', 'A senha precisa ter pelo menos 6 caracteres.'); return; }
   if (!aceitouTermos) { authErr('signup', 'Você precisa aceitar os Termos de Uso e a Política de Privacidade para criar sua conta.'); return; }
+  if (!_captchaTokenSignup) { authErr('signup', 'Confirme a verificação de segurança acima antes de continuar.'); return; }
   const btn = document.getElementById('auth-signup-txt');
   btn.textContent = 'Criando conta...';
   try {
@@ -5083,7 +5102,7 @@ async function doSignUp() {
       email, password: senha,
       // Registra nome e o momento exato do aceite dos termos — evidência
       // de consentimento, útil caso precise comprovar isso no futuro.
-      options: { data: { nome, termos_aceitos_em: new Date().toISOString() } }
+      options: { data: { nome, termos_aceitos_em: new Date().toISOString() }, captchaToken: _captchaTokenSignup }
     });
     if (error) throw error;
     if (data.session) {
@@ -5097,6 +5116,8 @@ async function doSignUp() {
     authErr('signup', e.message);
   } finally {
     btn.textContent = 'Criar minha conta';
+    resetTurnstile('turnstile-signup');
+    _captchaTokenSignup = null;
   }
 }
 
@@ -5119,11 +5140,13 @@ async function doSignIn() {
 async function doForgotPassword() {
   const email = document.getElementById('auth-forgot-email').value.trim();
   if (!email) { authErr('forgot', 'Digite seu e-mail.'); return; }
+  if (!_captchaTokenForgot) { authErr('forgot', 'Confirme a verificação de segurança acima antes de continuar.'); return; }
   const btn = document.getElementById('auth-forgot-txt');
   btn.textContent = 'Enviando...';
   try {
     const { error } = await sb.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin + window.location.pathname
+      redirectTo: window.location.origin + window.location.pathname,
+      captchaToken: _captchaTokenForgot
     });
     if (error) throw error;
     const ok = document.getElementById('auth-forgot-ok');
@@ -5133,6 +5156,8 @@ async function doForgotPassword() {
     authErr('forgot', e.message);
   } finally {
     btn.textContent = 'Enviar link de recuperação';
+    resetTurnstile('turnstile-forgot');
+    _captchaTokenForgot = null;
   }
 }
 
