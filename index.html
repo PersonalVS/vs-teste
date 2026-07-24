@@ -1165,6 +1165,7 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
       </div>
       <div class="caps-warning" id="auth-login-caps">⇪ Caps Lock está ativado</div>
     </div>
+    <div class="cf-turnstile" id="turnstile-login" data-sitekey="0x4AAAAAAD8SIAksGLICkVgG" data-callback="turnstileLoginOk" data-expired-callback="turnstileLoginReset" data-theme="dark" style="margin:2px 0"></div>
     <button class="btn btn-primary btn-full" style="padding:15px" onclick="doSignIn()"><span id="auth-login-txt">Entrar</span></button>
     <div style="text-align:right"><a style="font-size:12px;color:var(--accent);cursor:pointer" onclick="authShow('forgot')">Esqueci minha senha</a></div>
     <div class="auth-switch">Não tem conta? <a onclick="authShow('signup')">Criar conta grátis</a></div>
@@ -5078,10 +5079,13 @@ function traduzErroAuth(msg) {
 // ══════════════════════════════════════════
 let _captchaTokenSignup = null;
 let _captchaTokenForgot = null;
+let _captchaTokenLogin = null;
 function turnstileSignupOk(token) { _captchaTokenSignup = token; }
 function turnstileSignupReset()   { _captchaTokenSignup = null; }
 function turnstileForgotOk(token) { _captchaTokenForgot = token; }
 function turnstileForgotReset()   { _captchaTokenForgot = null; }
+function turnstileLoginOk(token)  { _captchaTokenLogin = token; }
+function turnstileLoginReset()    { _captchaTokenLogin = null; }
 function resetTurnstile(widgetId) {
   try { if (window.turnstile) turnstile.reset('#' + widgetId); } catch(e) {}
 }
@@ -5125,15 +5129,18 @@ async function doSignIn() {
   const email = document.getElementById('auth-login-email').value.trim();
   const senha = document.getElementById('auth-login-senha').value;
   if (!email || !senha) { authErr('login', 'Preencha e-mail e senha.'); return; }
+  if (!_captchaTokenLogin) { authErr('login', 'Confirme a verificação de segurança acima antes de continuar.'); return; }
   const btn = document.getElementById('auth-login-txt');
   btn.textContent = 'Entrando...';
   try {
-    const { error } = await sb.auth.signInWithPassword({ email, password: senha });
+    const { error } = await sb.auth.signInWithPassword({ email, password: senha, options: { captchaToken: _captchaTokenLogin } });
     if (error) throw error;
   } catch(e) {
     authErr('login', e.message);
   } finally {
     btn.textContent = 'Entrar';
+    resetTurnstile('turnstile-login');
+    _captchaTokenLogin = null;
   }
 }
 
