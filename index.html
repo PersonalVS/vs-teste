@@ -4,6 +4,15 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <meta name="theme-color" content="#17211c"/>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json"/>
+<link rel="icon" href="icon-192.png"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="PersonalVS"/>
+
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -1576,6 +1585,12 @@ html,body{height:100%;height:100dvh;overflow:hidden;font-family:'DM Sans',sans-s
 
       <div id="sb-status-card" class="card" style="margin-bottom:13px"></div>
 
+      <div class="card" style="margin-bottom:13px;background:rgba(255,193,90,.06);border-color:rgba(255,193,90,.25)">
+        <div class="card-title">💬 Ajude a melhorar o app</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:12px">Achou um bug, travou em algum lugar, ou tem uma ideia? Me conta direto — é assim que o app melhora.</div>
+        <button class="btn btn-primary btn-full" onclick="enviarFeedback()">📩 Enviar sugestão / reportar problema</button>
+      </div>
+
       <!-- PIN Security -->
       <div class="card" style="margin-bottom:13px">
         <div class="card-title">🔐 Segurança — PIN (neste aparelho)</div>
@@ -2549,7 +2564,18 @@ function renderStudentList() {
 
   const el = document.getElementById('student-list');
   if (!list.length) {
-    el.innerHTML = `<div style="text-align:center;padding:50px 0;color:var(--text3)"><div style="font-size:44px;margin-bottom:10px">🏋️</div><p style="font-size:14px">${q||activeFilter!=='all' ? 'Nenhum resultado.' : 'Nenhum aluno ainda.<br>Toque em <strong>➕</strong> para começar.'}</p></div>`;
+    if (!students.length) {
+      // Primeiro uso de verdade: conta nova, ainda sem nenhum aluno cadastrado.
+      el.innerHTML = `<div style="text-align:center;padding:56px 20px 40px;color:var(--text3)">
+        <div style="font-size:52px;margin-bottom:14px">👋</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px">Bem-vindo(a) ao PersonalVS!</div>
+        <p style="font-size:13px;line-height:1.6;max-width:280px;margin:0 auto 20px">Seu espaço já está pronto. Cadastre seu primeiro aluno pra começar a organizar treinos, presença e agenda.</p>
+        <button class="btn btn-primary" style="padding:13px 26px" onclick="openStudentForm()">➕ Cadastrar primeiro aluno</button>
+      </div>`;
+    } else {
+      // Tem alunos, mas a busca/filtro atual não encontrou nenhum.
+      el.innerHTML = `<div style="text-align:center;padding:50px 0;color:var(--text3)"><div style="font-size:44px;margin-bottom:10px">🔍</div><p style="font-size:14px">Nenhum resultado para esse filtro.</p></div>`;
+    }
     return;
   }
   el.innerHTML = list.map(s => {
@@ -5194,6 +5220,16 @@ async function flushAllPendingSyncNow() {
   await Promise.all(tasks);
 }
 
+// Abre o WhatsApp com uma mensagem pré-montada, já identificando quem
+// está mandando (e-mail da conta) — facilita muito dar suporte real.
+function enviarFeedback() {
+  const numeroSuporte = '5585996038644'; // troque pelo seu número, com código do país, sem +, espaço ou traço
+  const emailConta = currentUser?.email || '(não logado)';
+  const msg = `Oi! Estou usando o PersonalVS (conta: ${emailConta}) e queria comentar:\n\n`;
+  const url = `https://wa.me/${numeroSuporte}?text=${encodeURIComponent(msg)}`;
+  window.open(url, '_blank');
+}
+
 async function doSignOut() {
   if (!confirm('Sair da sua conta neste dispositivo?')) return;
   toast('☁️ Salvando alterações antes de sair...');
@@ -6410,6 +6446,15 @@ function authBoot() {
   });
 }
 authBoot();
+
+// Registra o Service Worker (habilita "Adicionar à tela inicial").
+// Se falhar por qualquer motivo, o app continua funcionando normal
+// no navegador — só não fica instalável.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
 
 
 // ══════════════════════════════════════════
