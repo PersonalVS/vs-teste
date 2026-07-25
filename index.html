@@ -6509,6 +6509,117 @@ function voltarConfigIA() {
   document.getElementById('ia-resultado-panel').style.display = 'none';
 }
 
+// ══════════════════════════════════════════
+// GERADOR LOCAL DE TREINO (fallback sem IA externa)
+// Usa um banco de exercícios por grupo muscular + regras de divisão
+// por número de dias. Não é IA generativa — é uma sugestão-base por
+// regras fixas, pra sempre ter algo útil mesmo sem chave de API.
+// ══════════════════════════════════════════
+function gerarTreinoLocal(letras, foco, nome, objetivo, nivel, lesoes, dias) {
+  const lesoesLower = (lesoes || '').toLowerCase();
+  const termosRisco = ['joelho', 'ombro', 'coluna', 'lombar', 'punho', 'tornozelo', 'quadril', 'cotovelo'];
+  const termosCitados = termosRisco.filter(t => lesoesLower.includes(t));
+  const evitar = (nomeExercicio) => termosCitados.some(t => nomeExercicio.toLowerCase().includes(t));
+
+  const banco = {
+    peito: [
+      { nome: 'Supino reto com barra', series: 4, reps: '8-10', descanso: 75, dica: 'Escápulas retraídas, barra desce até tocar o peito.' },
+      { nome: 'Supino inclinado com halteres', series: 3, reps: '10-12', descanso: 70, dica: 'Controle a descida, evite arquear as costas.' },
+      { nome: 'Crucifixo na polia', series: 3, reps: '12-15', descanso: 60, dica: 'Movimento em arco, foco na contração no meio.' },
+      { nome: 'Flexão de braço', series: 3, reps: 'até a falha', descanso: 60, dica: 'Corpo alinhado, cotovelos a 45°.' },
+    ],
+    costas: [
+      { nome: 'Puxada frontal', series: 4, reps: '8-10', descanso: 75, dica: 'Puxe com as costas, não com os braços.' },
+      { nome: 'Remada curvada com barra', series: 4, reps: '8-10', descanso: 75, dica: 'Tronco inclinado ~45°, core firme.' },
+      { nome: 'Remada baixa no cabo', series: 3, reps: '10-12', descanso: 65, dica: 'Puxe até o abdômen, ombros relaxados.' },
+      { nome: 'Pull-down unilateral', series: 3, reps: '12', descanso: 60, dica: 'Foco na contração do dorsal.' },
+    ],
+    ombro: [
+      { nome: 'Desenvolvimento com halteres', series: 4, reps: '8-10', descanso: 75, dica: 'Evite hiperextensão lombar.' },
+      { nome: 'Elevação lateral', series: 3, reps: '12-15', descanso: 55, dica: 'Cotovelos levemente flexionados.' },
+      { nome: 'Elevação frontal', series: 3, reps: '12', descanso: 55, dica: 'Movimento controlado, sem embalo.' },
+      { nome: 'Remada alta', series: 3, reps: '10-12', descanso: 60, dica: 'Cotovelos acima dos punhos.' },
+    ],
+    biceps: [
+      { nome: 'Rosca direta com barra', series: 3, reps: '10-12', descanso: 60, dica: 'Cotovelos fixos ao lado do corpo.' },
+      { nome: 'Rosca alternada com halteres', series: 3, reps: '10-12', descanso: 55, dica: 'Gire o punho no topo do movimento.' },
+      { nome: 'Rosca martelo', series: 3, reps: '12', descanso: 55, dica: 'Pega neutra, foco no braquial.' },
+    ],
+    triceps: [
+      { nome: 'Tríceps na polia (corda)', series: 3, reps: '10-12', descanso: 55, dica: 'Cotovelos fixos, extensão completa.' },
+      { nome: 'Tríceps testa', series: 3, reps: '10-12', descanso: 60, dica: 'Movimento controlado, evite abrir os cotovelos.' },
+      { nome: 'Mergulho no banco', series: 3, reps: '12-15', descanso: 55, dica: 'Desça até 90° no cotovelo.' },
+    ],
+    perna: [
+      { nome: 'Agachamento livre', series: 4, reps: '8-10', descanso: 90, dica: 'Joelhos alinhados com a ponta dos pés.' },
+      { nome: 'Leg press 45°', series: 4, reps: '10-12', descanso: 80, dica: 'Não trave os joelhos no topo.' },
+      { nome: 'Cadeira extensora', series: 3, reps: '12-15', descanso: 60, dica: 'Contração no topo, descida controlada.' },
+      { nome: 'Cadeira flexora', series: 3, reps: '12-15', descanso: 60, dica: 'Evite impulso com o quadril.' },
+      { nome: 'Afundo com halteres', series: 3, reps: '10 cada perna', descanso: 70, dica: 'Tronco ereto, joelho não passa da ponta do pé.' },
+      { nome: 'Panturrilha em pé', series: 4, reps: '15-20', descanso: 45, dica: 'Amplitude total, pausa no topo.' },
+    ],
+    gluteo: [
+      { nome: 'Elevação de quadril (hip thrust)', series: 4, reps: '10-12', descanso: 75, dica: 'Contração máxima no topo.' },
+      { nome: 'Cadeira abdutora', series: 3, reps: '15', descanso: 50, dica: 'Movimento controlado, sem embalo.' },
+      { nome: 'Stiff com halteres', series: 3, reps: '10-12', descanso: 75, dica: 'Costas retas, quadril pra trás.' },
+    ],
+    core: [
+      { nome: 'Prancha abdominal', series: 3, reps: '30-45s', descanso: 45, dica: 'Corpo alinhado, sem deixar o quadril cair.' },
+      { nome: 'Abdominal remador', series: 3, reps: '15-20', descanso: 45, dica: 'Movimento controlado, sem tranco no pescoço.' },
+      { nome: 'Elevação de pernas', series: 3, reps: '12-15', descanso: 45, dica: 'Lombar sempre apoiada no chão.' },
+    ],
+    funcional: [
+      { nome: 'Kettlebell swing', series: 4, reps: '15', descanso: 60, dica: 'Movimento vem do quadril, não dos braços.' },
+      { nome: 'Burpee', series: 3, reps: '10-12', descanso: 60, dica: 'Ritmo constante, sem pressa na descida.' },
+      { nome: 'Mountain climber', series: 3, reps: '30s', descanso: 40, dica: 'Core firme durante todo o movimento.' },
+      { nome: 'Agachamento com salto', series: 3, reps: '10-12', descanso: 60, dica: 'Aterrissagem suave, joelhos semi-flexionados.' },
+    ],
+    cardio: [
+      { nome: 'Esteira ou bike (intervalado)', series: 1, reps: '15-20 min', descanso: 0, dica: 'Alterne intensidade alta e moderada.' },
+      { nome: 'Corda naval (battle rope)', series: 4, reps: '30s', descanso: 40, dica: 'Mantenha os joelhos semi-flexionados.' },
+    ],
+  };
+
+  // Filtro simples de segurança: remove exercícios cujo nome cita
+  // termos presentes nas lesões relatadas. É um filtro básico por
+  // palavra-chave, não substitui a avaliação profissional.
+  Object.keys(banco).forEach(g => { banco[g] = banco[g].filter(ex => !evitar(ex.nome)); });
+
+  // Divisão de grupos musculares por dia, conforme quantos dias existem
+  const n = letras.length;
+  let splits;
+  if (n <= 1) splits = [['peito', 'costas', 'ombro', 'perna', 'core']];
+  else if (n === 2) splits = [['peito', 'ombro', 'triceps', 'core'], ['costas', 'biceps', 'perna', 'gluteo']];
+  else if (n === 3) splits = [['peito', 'ombro', 'triceps'], ['costas', 'biceps', 'core'], ['perna', 'gluteo', 'cardio']];
+  else if (n === 4) splits = [['peito', 'triceps'], ['costas', 'biceps'], ['perna', 'gluteo'], ['ombro', 'core', 'cardio']];
+  else if (n === 5) splits = [['peito'], ['costas'], ['perna', 'gluteo'], ['ombro'], ['biceps', 'triceps', 'core']];
+  else splits = [['peito', 'triceps'], ['costas', 'biceps'], ['perna'], ['ombro', 'core'], ['gluteo', 'funcional'], ['cardio', 'funcional']];
+
+  const qtdPorFoco = { completo: 6, hipertrofia: 6, emagrecimento: 5, reabilitacao: 4, funcional: 5, iniciante: 4 };
+  const qtdAlvo = qtdPorFoco[foco] || 5;
+
+  const diasObj = {};
+  letras.forEach((letra, i) => {
+    const grupos = splits[i % splits.length];
+    let pool = [];
+    grupos.forEach(g => { pool = pool.concat((banco[g] || []).map(ex => ({ ...ex, grupo: g }))); });
+    if (foco === 'funcional') pool = pool.concat(banco.funcional.map(ex => ({ ...ex, grupo: 'funcional' })));
+    if (foco === 'emagrecimento') pool = pool.concat(banco.cardio.map(ex => ({ ...ex, grupo: 'cardio' })));
+    pool = pool.sort(() => Math.random() - 0.5).slice(0, qtdAlvo);
+    if (!pool.length) pool = (banco.core || []).map(ex => ({ ...ex, grupo: 'core' })); // fallback se tudo foi filtrado por segurança
+    diasObj[letra] = pool.map(ex => ({
+      nome: ex.nome, grupo: ex.grupo, series: String(ex.series), reps: ex.reps, descanso: ex.descanso, dica: ex.dica
+    }));
+  });
+
+  const partes = [`Treino gerado localmente (sem IA externa) pra ${nome}, com foco em "${foco}".`];
+  if (objetivo) partes.push(`Objetivo considerado: ${objetivo}.`);
+  if (termosCitados.length) partes.push(`Exercícios que citavam ${termosCitados.join(', ')} no nome foram evitados — revise mesmo assim antes de aplicar, esse filtro é só por palavra-chave.`);
+  partes.push('Esta é uma sugestão-base por regras fixas, não gerada por inteligência artificial — ajuste séries, cargas e exercícios conforme sua avaliação profissional.');
+
+  return { resumo: partes.join(' '), dias: diasObj };
+}
+
 async function gerarSugestaoIA() {
   // Lê dados do aluno salvo OU dos campos abertos do formulário
   const s = selectedStudentId ? students.find(x => x.id === selectedStudentId) : null;
@@ -6532,61 +6643,18 @@ async function gerarSugestaoIA() {
   btn.disabled = true;
   document.getElementById('ia-gerar-txt').innerHTML = '<span class="spinner"></span> Gerando...';
 
-  const diasExJson = letras.map(l => `"${l}":[{"nome":"","grupo":"","series":"","reps":"","descanso":60,"dica":""}]`).join(',');
-
-  const prompt = `Você é um personal trainer especialista em prescrição de treino. Crie uma proposta detalhada para o seguinte aluno:
-
-FICHA DO ALUNO:
-- Nome: ${nome}
-- Sexo: ${sexo||'não informado'} | Idade: ${idade||'não informada'}
-- Objetivo: ${objetivo||'não informado'}
-- Objetivos anamnese: ${objsAna||'não informados'}
-- Nível de atividade: ${nivel||'não informado'}
-- Lesões/restrições: ${lesoes||'nenhuma reportada'}
-- Doenças/condições: ${doencas||'nenhuma reportada'}
-- Medicamentos: ${meds||'nenhum'}
-- Dias/semana: ${dias} | Ciclo: ${letras.join('/')}
-- Foco escolhido: ${iaFoco}
-${obsExtra?`- Obs. extra: ${obsExtra}`:''}
-
-REGRAS OBRIGATÓRIAS:
-1. Gere exatamente os treinos: ${letras.join(', ')}
-2. Cada treino: 5 a 7 exercícios
-3. Respeite ESTRITAMENTE lesões e restrições — não prescreva exercícios contraindicados
-4. Adapte volume e intensidade ao nível do aluno
-5. Distribua grupos musculares de forma inteligente entre os dias
-6. Cada exercício: nome comercial brasileiro, grupo muscular, séries (número), reps (número ou range), descanso em segundos (número), dica de execução em 1 frase
-
-Retorne SOMENTE JSON válido sem markdown, sem texto extra:
-{"resumo":"texto explicando a lógica","dias":{${diasExJson}}}`;
-
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': '',
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 2500, messages: [{ role: 'user', content: prompt }] })
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    const raw = data.content.map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
-    iaSugestao = JSON.parse(raw);
-    renderResultadoIA(iaSugestao, letras);
-    document.getElementById('ia-config-panel').style.display = 'none';
-    document.getElementById('ia-resultado-panel').style.display = 'block';
-    toast('✅ Proposta gerada! Revise e aprove.');
-  } catch(err) {
-    console.warn('API indisponível, usando gerador local:', err.message);
-    // ── FALLBACK LOCAL: gera treino completo sem API ──────────────────────
+    // Chamada direta a APIs de IA a partir do navegador exigiria expor uma
+    // chave de API no código público do app — isso é inseguro (qualquer
+    // pessoa poderia roubar a chave pelo "Inspecionar" do navegador) e por
+    // isso não é feito aqui. Usamos o gerador local por regras fixas.
     iaSugestao = gerarTreinoLocal(letras, iaFoco, nome, objetivo, nivel, lesoes, dias);
     renderResultadoIA(iaSugestao, letras);
     document.getElementById('ia-config-panel').style.display = 'none';
     document.getElementById('ia-resultado-panel').style.display = 'block';
     toast('✅ Proposta gerada! Revise e aprove.');
+  } catch(err) {
+    toast('❌ Não foi possível gerar a proposta: ' + err.message);
   } finally {
     btn.disabled = false;
     document.getElementById('ia-gerar-txt').textContent = '✨ Gerar Proposta de Treino';
