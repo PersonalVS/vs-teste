@@ -1250,6 +1250,14 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
   </div>
 </div>
 
+<!-- ONBOARDING GUIADO (só na primeira vez, sem alunos ainda) -->
+<div id="onboarding-overlay" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:10500;flex-direction:column;justify-content:center;padding:calc(var(--safe-top)+28px) 26px calc(var(--safe-bottom)+28px)">
+  <div style="text-align:right"><a onclick="pularOnboarding()" style="font-size:13px;color:var(--text3);cursor:pointer">Pular ›</a></div>
+  <div id="onboarding-content" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"></div>
+  <div id="onboarding-dots" style="display:flex;justify-content:center;gap:7px;margin:20px 0"></div>
+  <button class="btn btn-primary btn-full" style="padding:15px" id="onboarding-next-btn" onclick="onboardingNext()">Próximo</button>
+</div>
+
 <div id="app" style="display:none">
   <div id="topbar">
     <button class="back-btn" id="back-btn" onclick="goBack()">‹</button>
@@ -1534,6 +1542,7 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
       <div id="detail-info-grid" class="info-grid"></div>
       <div id="detail-obs-box" style="display:none" class="hint"><span>📝</span><span id="detail-obs-text"></span></div>
       <div id="detail-anamnese-box" style="display:none;margin-bottom:13px"></div>
+      <div id="detail-historico-box" style="display:none;margin-bottom:13px"></div>
       <div class="mode-toggle">
         <button class="mode-btn active" id="mode-edit-btn" onclick="setMode('edit')">✏️ Editar</button>
         <button class="mode-btn" id="mode-view-btn" onclick="setMode('view')">👁 Visualizar</button>
@@ -2090,6 +2099,13 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
   </div>
 </div>
 <!-- EXERCISE MODAL -->
+<div id="historico-modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:200;display:none;align-items:flex-end;backdrop-filter:blur(4px)" onclick="closeHistoricoModal(event)">
+  <div id="modal-box" style="max-height:80vh;overflow-y:auto" onclick="event.stopPropagation()">
+    <div class="modal-title"><span>📜 Histórico de alterações</span><button class="modal-close" onclick="closeHistoricoModal()">✕</button></div>
+    <div id="historico-modal-content"></div>
+  </div>
+</div>
+
 <div id="modal-overlay" onclick="closeModal(event)">
   <div id="modal-box">
     <div class="modal-title"><span id="modal-title-text">Novo Exercício</span><button class="modal-close" onclick="closeModal()">✕</button></div>
@@ -2442,8 +2458,23 @@ function showScreen(name) {
   if (name === 'home') checkNotifBanner();
   if (name === 'dashboard') renderDashboard();
 }
+// ══════════════════════════════════════════
+// ANALYTICS BÁSICO — registra eventos de uso de forma discreta.
+// Nunca deve travar nem atrasar o app: sempre "dispara e esquece",
+// e qualquer erro é silenciosamente ignorado.
+// ══════════════════════════════════════════
+function trackEvent(eventName, detalhe) {
+  if (!currentUser) return;
+  try {
+    sb.from('analytics_events').insert({
+      user_id: currentUser.id, event_name: eventName, detalhe: detalhe || null
+    }).then(() => {}).catch(() => {});
+  } catch(e) { /* silencioso, analytics nunca deve quebrar o app */ }
+}
+
 function showNav(tab) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  trackEvent('tela_' + tab);
   if (tab === 'home') { document.getElementById('nav-home').classList.add('active'); showScreen('home'); renderHome(); }
   else if (tab === 'add') { document.getElementById('nav-add').classList.add('active'); openStudentForm(null); }
   else if (tab === 'agenda') { document.getElementById('nav-agenda').classList.add('active'); showScreen('agenda'); renderAgenda(); }
@@ -2772,7 +2803,22 @@ function saveStudent() {
       const lastE = history[history.length - 1];
       const changed = !lastE || lastE.weight !== data.weight || lastE.bodyFat !== data.bodyFat || lastE.muscleMass !== data.muscleMass;
       if (changed) history.push(entry);
-      students[idx] = { ...prev, ...data, progressHistory: history };
+
+      // Histórico de alterações — registra mudanças em campos relevantes
+      // (não físicos, esses já ficam no progressHistory acima).
+      const camposRastreados = {
+        goal: 'Objetivo', lesoes: 'Lesões/Restrições', doencas: 'Doenças/Condições',
+        medicamentos: 'Medicamentos', nivelAtividade: 'Nível de atividade',
+        daysPerWeek: 'Dias por semana', cycle: 'Ciclo de treino', payDay: 'Dia de vencimento',
+        valor: 'Valor mensal', obs: 'Observações',
+      };
+      const mudancas = Object.keys(camposRastreados)
+        .filter(campo => (prev[campo] || '') !== (data[campo] || ''))
+        .map(campo => ({ campo: camposRastreados[campo], de: prev[campo] || '(vazio)', para: data[campo] || '(vazio)' }));
+      const historicoAlteracoes = Array.isArray(prev.historicoAlteracoes) ? prev.historicoAlteracoes : [];
+      if (mudancas.length) historicoAlteracoes.push({ date: new Date().toISOString(), mudancas });
+
+      students[idx] = { ...prev, ...data, progressHistory: history, historicoAlteracoes };
       applyManualPayToggle(students[idx], data.payStatus, prevPayStatus);
       save();
       toast('✅ Aluno atualizado!');
@@ -2796,6 +2842,7 @@ function saveStudent() {
       ensurePaidUntil(newStudent);
       students.push(newStudent);
       save();
+      trackEvent('aluno_cadastrado');
       toast('✅ Aluno cadastrado com sucesso!');
       pendingProfilePhoto = null;
       selectedStudentId = newStudent.id;
@@ -2861,6 +2908,34 @@ function applyDuplicate(fromId) {
 // ══════════════════════════════════════════
 // STUDENT DETAIL
 // ══════════════════════════════════════════
+function abrirHistoricoModal() {
+  const s = students.find(x => x.id === selectedStudentId);
+  const lista = (s?.historicoAlteracoes || []).slice().reverse(); // mais recente primeiro
+  const content = document.getElementById('historico-modal-content');
+  if (!lista.length) {
+    content.innerHTML = `<p style="font-size:13px;color:var(--text3);text-align:center;padding:20px 0">Nenhuma alteração registrada ainda.</p>`;
+  } else {
+    content.innerHTML = lista.map(registro => {
+      const data = new Date(registro.date).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+      const linhas = registro.mudancas.map(m =>
+        `<div style="font-size:12px;padding:6px 0;border-top:1px solid var(--border)">
+          <div style="font-weight:700;color:var(--text2);margin-bottom:2px">${m.campo}</div>
+          <div style="color:var(--text3)"><span style="text-decoration:line-through">${m.de}</span> → <span style="color:var(--accent)">${m.para}</span></div>
+        </div>`
+      ).join('');
+      return `<div style="margin-bottom:16px">
+        <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:2px">${data}</div>
+        ${linhas}
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('historico-modal-overlay').style.display = 'flex';
+}
+function closeHistoricoModal(e) {
+  if (e && e.target.id !== 'historico-modal-overlay') return;
+  document.getElementById('historico-modal-overlay').style.display = 'none';
+}
+
 function showStudentDetail(id) {
   try {
     selectedStudentId = id;
@@ -2917,6 +2992,20 @@ function showStudentDetail(id) {
       }
     }
 
+    const histBox = document.getElementById('detail-historico-box');
+    if (histBox) {
+      const qtdHist = (s.historicoAlteracoes || []).length;
+      if (qtdHist) {
+        histBox.style.display = 'block';
+        histBox.innerHTML = `<button class="card" style="width:100%;text-align:left;cursor:pointer;display:flex;align-items:center;justify-content:space-between;background:var(--card2)" onclick="abrirHistoricoModal()">
+          <span style="font-size:13px;font-weight:700">📜 Histórico de alterações</span>
+          <span style="font-size:12px;color:var(--text3)">${qtdHist} registro${qtdHist>1?'s':''} ›</span>
+        </button>`;
+      } else {
+        histBox.style.display = 'none';
+      }
+    }
+
     renderDayTabs(s);
     renderExerciseArea(s);
     setMode('edit');
@@ -2959,10 +3048,13 @@ function getExMedia(exId) {
   const s = students.find(x => x.id === selectedStudentId);
   return (s.exercises?.[activeDay]||[]).find(e => e.id === exId)?.media || [];
 }
-function removeExMedia(exId, mi) {
+async function removeExMedia(exId, mi) {
   const s = students.find(x => x.id === selectedStudentId);
   const ex = (s.exercises?.[activeDay]||[]).find(e => e.id === exId);
-  if (ex?.media) { ex.media.splice(mi, 1); save(); renderExerciseArea(s); }
+  if (!ex?.media) return;
+  const ok = await showConfirm('🗑', 'Remover mídia?', 'Esta ação não pode ser desfeita.', 'Remover');
+  if (!ok) return;
+  ex.media.splice(mi, 1); save(); renderExerciseArea(s);
 }
 function addMediaToEx(exId) { openExModal(exId, true); }
 
@@ -3453,7 +3545,9 @@ function marcarAulaReposta(id) {
   renderAulasARepor();
   toast('✅ Aula marcada como reposta!');
 }
-function excluirAulaARepor(id) {
+async function excluirAulaARepor(id) {
+  const ok = await showConfirm('🗑', 'Remover aula a repor?', 'Esta ação não pode ser desfeita.', 'Remover');
+  if (!ok) return;
   aulasARepor = aulasARepor.filter(x => x.id !== id);
   saveAulasARepor();
   renderAulasARepor();
@@ -4426,7 +4520,9 @@ function addListaEspera() {
   renderListaEspera();
   toast('✅ Adicionado à lista de espera');
 }
-function deleteListaEspera(id) {
+async function deleteListaEspera(id) {
+  const ok = await showConfirm('🗑', 'Remover da lista de espera?', 'Esta ação não pode ser desfeita.', 'Remover');
+  if (!ok) return;
   listaEspera = listaEspera.filter(x => x.id !== id);
   saveListaEspera();
   renderListaEspera();
@@ -4751,7 +4847,9 @@ function addNotaRapida() {
   renderNotasRapidas();
   toast('✅ Anotação salva');
 }
-function deleteNotaRapida(id) {
+async function deleteNotaRapida(id) {
+  const ok = await showConfirm('🗑', 'Excluir nota?', 'Esta ação não pode ser desfeita.', 'Excluir');
+  if (!ok) return;
   notasRapidas = notasRapidas.filter(n => n.id !== id);
   saveNotasRapidas();
   renderNotasRapidas();
@@ -5239,6 +5337,7 @@ async function flushAllPendingSyncNow() {
 // Abre o WhatsApp com uma mensagem pré-montada, já identificando quem
 // está mandando (e-mail da conta) — facilita muito dar suporte real.
 function enviarFeedback() {
+  trackEvent('feedback_enviado');
   const numeroSuporte = '5585996038644'; // troque pelo seu número, com código do país, sem +, espaço ou traço
   const emailConta = currentUser?.email || '(não logado)';
   const msg = `Oi! Estou usando o PersonalVS (conta: ${emailConta}) e queria comentar:\n\n`;
@@ -5511,7 +5610,9 @@ function changePIN() {
   document.body.appendChild(overlay);
 }
 
-function removePIN() {
+async function removePIN() {
+  const ok = await showConfirm('🔓', 'Remover o PIN?', 'Seu app ficará sem proteção de acesso neste aparelho.', 'Remover PIN');
+  if (!ok) return;
   localStorage.removeItem('fp_pin');
   localStorage.setItem('fp_pin_skip','1');
   toast('🔓 PIN removido. App ficará desbloqueado.');
@@ -5701,9 +5802,11 @@ function renderPhotosHistory(s) {
   }).join('');
 }
 
-function deleteProgressPhoto(idx) {
+async function deleteProgressPhoto(idx) {
   const s = students.find(x => x.id === selectedStudentId);
   if (!s) return;
+  const ok = await showConfirm('🗑', 'Excluir foto de progresso?', 'Esta ação não pode ser desfeita.', 'Excluir');
+  if (!ok) return;
   s.progressPhotos.splice(idx, 1);
   save();
   renderPhotosHistory(s);
@@ -6406,9 +6509,11 @@ function salvarRefeicao() {
   toast('✅ Refeição salva!');
 }
 
-function removerRefeicao(idx) {
+async function removerRefeicao(idx) {
   const s = nutriStudentId ? students.find(x => x.id === nutriStudentId) : null;
   if (!s?.nutriData?.refeicoes) return;
+  const ok = await showConfirm('🗑', 'Remover refeição?', 'Esta ação não pode ser desfeita.', 'Remover');
+  if (!ok) return;
   s.nutriData.refeicoes.splice(idx, 1);
   save();
   renderRefeicoes(s.nutriData.refeicoes);
@@ -6418,11 +6523,52 @@ function removerRefeicao(idx) {
 // BOOT DO APP (só roda depois de autenticado)
 // ══════════════════════════════════════════
 let _appBooted = false;
+// ══════════════════════════════════════════
+// ONBOARDING GUIADO — só aparece no primeiro uso de verdade
+// (sem nenhum aluno cadastrado ainda, e nunca visto antes neste aparelho)
+// ══════════════════════════════════════════
+const ONBOARDING_STEPS = [
+  { icon: '👋', titulo: 'Bem-vindo(a) ao PersonalVS!', texto: 'Seu espaço já está pronto — os dados que você cadastrar aqui ficam só seus, isolados com segurança.' },
+  { icon: '🧍', titulo: 'Cadastre seus alunos', texto: 'Guarde ficha, treino, frequência e anamnese de cada aluno num só lugar, sem planilha e sem papel.' },
+  { icon: '📅', titulo: 'Agenda e financeiro', texto: 'Controle presença, vencimentos e sua agenda de trabalho, com alertas automáticos de atraso.' },
+  { icon: '☁️', titulo: 'Tudo sincronizado', texto: 'Seus dados são salvos na nuvem automaticamente — pode trocar de aparelho sem perder nada.' },
+];
+let _onboardingIdx = 0;
+
+function checkOnboarding() {
+  if (localStorage.getItem('fp_onboarding_seen')) return;
+  if (students.length > 0) { localStorage.setItem('fp_onboarding_seen', '1'); return; } // já tinha dados antes desse recurso existir
+  _onboardingIdx = 0;
+  renderOnboardingStep();
+  document.getElementById('onboarding-overlay').style.display = 'flex';
+}
+function renderOnboardingStep() {
+  const step = ONBOARDING_STEPS[_onboardingIdx];
+  document.getElementById('onboarding-content').innerHTML = `
+    <div style="font-size:64px;margin-bottom:22px">${step.icon}</div>
+    <div style="font-size:19px;font-weight:800;font-family:'Syne',sans-serif;margin-bottom:10px">${step.titulo}</div>
+    <p style="font-size:14px;color:var(--text2);line-height:1.6;max-width:300px;margin:0 auto">${step.texto}</p>`;
+  document.getElementById('onboarding-dots').innerHTML = ONBOARDING_STEPS.map((_, i) =>
+    `<div style="width:7px;height:7px;border-radius:50%;background:${i === _onboardingIdx ? 'var(--accent)' : 'var(--border)'}"></div>`
+  ).join('');
+  document.getElementById('onboarding-next-btn').textContent = _onboardingIdx === ONBOARDING_STEPS.length - 1 ? 'Vamos começar!' : 'Próximo';
+}
+function onboardingNext() {
+  if (_onboardingIdx < ONBOARDING_STEPS.length - 1) { _onboardingIdx++; renderOnboardingStep(); }
+  else fecharOnboarding();
+}
+function pularOnboarding() { fecharOnboarding(); }
+function fecharOnboarding() {
+  localStorage.setItem('fp_onboarding_seen', '1');
+  document.getElementById('onboarding-overlay').style.display = 'none';
+}
+
 async function bootApp() {
   document.getElementById('topbar-logo-img').src = 'data:image/png;base64,' + LOGO_ICON_B64;
   if (!_appBooted) {
     _appBooted = true;
     await sbPull();          // traz os dados do usuário logado da nuvem
+    trackEvent('sessao_iniciada');
   }
   updateSyncIndicator('ok');
   renderHome();
@@ -6432,6 +6578,7 @@ async function bootApp() {
   if ('Notification' in window && Notification.permission === 'granted') {
     schedulePaymentNotifications();
   }
+  checkOnboarding();
 }
 
 // ══════════════════════════════════════════
@@ -6652,6 +6799,7 @@ async function gerarSugestaoIA() {
     renderResultadoIA(iaSugestao, letras);
     document.getElementById('ia-config-panel').style.display = 'none';
     document.getElementById('ia-resultado-panel').style.display = 'block';
+    trackEvent('treino_gerado', iaFoco);
     toast('✅ Proposta gerada! Revise e aprove.');
   } catch(err) {
     toast('❌ Não foi possível gerar a proposta: ' + err.message);
