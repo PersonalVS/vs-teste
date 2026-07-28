@@ -1279,6 +1279,7 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
         </div>
         <div style="color:var(--blue);font-size:18px">›</div>
       </div>
+      <div id="birthday-alert-home" style="display:none"></div>
       <div id="pay-alert-home" style="display:none"></div>
       <div class="stats-row" id="stats-row"></div>
       <div class="search-wrap">
@@ -1609,6 +1610,15 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
       <div style="font-size:13px;color:var(--text2);margin-bottom:16px">Seus dados ficam isolados na nuvem, só você tem acesso</div>
 
       <div id="sb-status-card" class="card" style="margin-bottom:13px"></div>
+
+      <!-- PAINEL ADMIN — só aparece para quem está na tabela admins -->
+      <div class="card" id="admin-panel-card" style="display:none;margin-bottom:13px;background:rgba(90,160,255,.06);border-color:rgba(90,160,255,.25)">
+        <div class="card-title">🛠️ Painel de Administrador</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6">Visão geral de uso do app. Você não tem acesso aos dados dos alunos de outras contas — só aos números agregados abaixo.</div>
+        <div id="admin-stats-summary" style="display:flex;gap:10px;margin-bottom:12px"></div>
+        <div id="admin-stats-table" style="max-height:320px;overflow-y:auto"></div>
+        <button class="btn btn-outline btn-sm btn-full" style="margin-top:10px" onclick="loadAdminStats()">🔄 Atualizar</button>
+      </div>
 
       <div class="card" style="margin-bottom:13px;background:rgba(255,193,90,.06);border-color:rgba(255,193,90,.25)">
         <div class="card-title">💬 Ajude a melhorar o app</div>
@@ -2498,7 +2508,69 @@ function goBack() {
 // ══════════════════════════════════════════
 // HOME
 // ══════════════════════════════════════════
-function renderHome() { renderPayAlertHome(); renderStats(); renderStudentList(); }
+function renderHome() { renderBirthdayAlertHome(); renderPayAlertHome(); renderStats(); renderStudentList(); }
+
+// ══════════════════════════════════════════
+// 🎂 Lembrete de aniversário (tela inicial)
+// Mostra alunos que fazem aniversário hoje, amanhã ou em 2 dias
+// ══════════════════════════════════════════
+function renderBirthdayAlertHome() {
+  const el = document.getElementById('birthday-alert-home');
+  if (!el) return;
+
+  const proximos = students
+    .map(s => ({ s, dias: diasAteAniversario(s.birthDate) }))
+    .filter(x => x.dias !== null && x.dias <= 2)
+    .sort((a,b) => a.dias - b.dias);
+
+  if (!proximos.length) { el.style.display = 'none'; return; }
+
+  const itensHtml = proximos.map(({s, dias}) => {
+    const label = dias === 0 ? '🎉 Hoje!' : dias === 1 ? 'Amanhã' : 'Em 2 dias';
+    return `
+    <div style="display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-top:6px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.name}</div>
+        <div style="font-size:10.5px;color:#c77dff;margin-top:1px">🎂 ${label}</div>
+      </div>
+      <button class="btn btn-sm btn-outline" style="flex-shrink:0;padding:6px 10px;font-size:11px" onclick="event.stopPropagation(); mandarParabensWpp('${s.id}')">💬 Parabenizar</button>
+    </div>`;
+  }).join('');
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="background:rgba(199,125,255,.1);border:1px solid rgba(199,125,255,.35);border-radius:13px;padding:12px 14px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:11px">
+        <div style="font-size:22px">🎂</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;color:#c77dff">${proximos.length} aniversário${proximos.length!==1?'s':''} chegando</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">Alunos que fazem aniversário hoje ou nos próximos 2 dias</div>
+        </div>
+      </div>
+      ${itensHtml}
+    </div>`;
+}
+
+function scheduleBirthdayNotifications() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  students.forEach(s => {
+    const dias = diasAteAniversario(s.birthDate);
+    if (dias === null) return;
+    if (dias === 0) {
+      setTimeout(() => {
+        new Notification('🎉 PersonalVS — Aniversário hoje!', {
+          body: `Hoje é aniversário de ${s.name.split(' ')[0]}. Que tal mandar parabéns?`,
+        });
+      }, 5000);
+    } else if (dias === 2) {
+      setTimeout(() => {
+        new Notification('🎂 PersonalVS — Aniversário chegando', {
+          body: `${s.name.split(' ')[0]} faz aniversário em 2 dias.`,
+        });
+      }, 5500);
+    }
+  });
+}
 
 // ══════════════════════════════════════════
 // 🔴 Alerta automático de vencimento (tela inicial)
@@ -5444,6 +5516,68 @@ function sbStatusCard() {
   }
 }
 
+// ══════════════════════════════════════════
+// 🛠️ PAINEL DE ADMINISTRADOR
+// Mostra só números agregados (nº de contas e nº de alunos por
+// conta) — nunca os dados individuais dos alunos de outras contas.
+// Requer que o user_id esteja cadastrado na tabela "admins" no
+// Supabase (ver admin_setup.sql).
+// ══════════════════════════════════════════
+let isAdmin = false;
+
+async function checkAdminAccess() {
+  if (!currentUser) { isAdmin = false; return; }
+  try {
+    const { data, error } = await sb.rpc('am_i_admin');
+    isAdmin = !error && data === true;
+  } catch (e) {
+    isAdmin = false;
+  }
+  const card = document.getElementById('admin-panel-card');
+  if (card) card.style.display = isAdmin ? 'block' : 'none';
+  if (isAdmin) loadAdminStats();
+}
+
+async function loadAdminStats() {
+  if (!isAdmin) return;
+  const summaryEl = document.getElementById('admin-stats-summary');
+  const tableEl = document.getElementById('admin-stats-table');
+  if (!summaryEl || !tableEl) return;
+  summaryEl.innerHTML = `<div style="font-size:12px;color:var(--text3)">Carregando…</div>`;
+  tableEl.innerHTML = '';
+  try {
+    const { data, error } = await sb.rpc('admin_get_stats');
+    if (error) throw new Error(error.message);
+
+    const totalContas = data.length;
+    const totalAlunos = data.reduce((acc, r) => acc + (r.total_alunos || 0), 0);
+
+    summaryEl.innerHTML = `
+      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:20px;font-weight:800">${totalContas}</div>
+        <div style="font-size:10.5px;color:var(--text3)">contas cadastradas</div>
+      </div>
+      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:20px;font-weight:800">${totalAlunos}</div>
+        <div style="font-size:10.5px;color:var(--text3)">alunos no total</div>
+      </div>`;
+
+    tableEl.innerHTML = data.map(r => {
+      const criado = r.criado_em ? new Date(r.criado_em).toLocaleDateString('pt-BR') : '—';
+      return `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.email || '—'}</div>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:1px">Cadastrado em ${criado}</div>
+        </div>
+        <div style="font-size:13px;font-weight:800;color:var(--accent);flex-shrink:0">${r.total_alunos} 🧍</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    summaryEl.innerHTML = `<div style="font-size:12px;color:var(--red)">Erro ao carregar: ${e.message}</div>`;
+  }
+}
+
 async function sbPush() {
   if (!currentUser) { toast('⚠️ Faça login primeiro'); return; }
   toast('⬆️ Enviando...');
@@ -5652,6 +5786,7 @@ async function requestNotifPermission() {
     toast('✅ Notificações ativadas!');
     document.getElementById('notif-banner-home').style.display = 'none';
     schedulePaymentNotifications();
+    scheduleBirthdayNotifications();
   } else {
     toast('❌ Permissão negada. Ative nas configurações do navegador.');
   }
@@ -6569,6 +6704,7 @@ async function bootApp() {
     _appBooted = true;
     await sbPull();          // traz os dados do usuário logado da nuvem
     trackEvent('sessao_iniciada');
+    checkAdminAccess();      // verifica silenciosamente se este usuário é admin
   }
   updateSyncIndicator('ok');
   renderHome();
@@ -6577,6 +6713,7 @@ async function bootApp() {
   startAutoSync();
   if ('Notification' in window && Notification.permission === 'granted') {
     schedulePaymentNotifications();
+    scheduleBirthdayNotifications();
   }
   checkOnboarding();
 }
