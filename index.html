@@ -51,7 +51,7 @@ const SYNC_KEYS = new Set([
   'fp_falta_motivos', 'fp_lista_espera', 'fp_horario_trabalho',
   'fp_mvp_fases', 'fp_apresentacao', 'fp_dash_hist',
   'fp_cartao_nome', 'fp_cartao_tagline', 'fp_cartao_tema',
-  'fp_cartao_contato', 'fp_cartao_logo_custom',
+  'fp_cartao_contato', 'fp_cartao_logo_custom', 'fp_contas_pagar',
 ]);
 
 // Valor "vazio" correto de cada chave, usado quando a nuvem não tem
@@ -63,7 +63,7 @@ const SYNC_DEFAULTS = {
   fp_falta_motivos: {}, fp_lista_espera: [], fp_horario_trabalho: null,
   fp_mvp_fases: {}, fp_apresentacao: null, fp_dash_hist: {},
   fp_cartao_nome: '', fp_cartao_tagline: '', fp_cartao_tema: '',
-  fp_cartao_contato: '', fp_cartao_logo_custom: '',
+  fp_cartao_contato: '', fp_cartao_logo_custom: '', fp_contas_pagar: [],
 };
 
 // Reflete o valor (vindo da nuvem OU do padrão) nas variáveis em
@@ -77,6 +77,7 @@ function applyKeyToMemory(key, value) {
   if (key === 'fp_lista_espera')   listaEspera        = value || [];
   if (key === 'fp_notas_rapidas')  notasRapidas       = value || [];
   if (key === 'fp_apresentacao')   apresentacaoSlides = value || APRESENTACAO_DEFAULT;
+  if (key === 'fp_contas_pagar')   contasPagar        = value || [];
 }
 
 const _syncTimers = {};
@@ -1902,6 +1903,19 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
 
       <!-- Cards de resumo -->
       <div id="dash-summary" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px"></div>
+
+      <!-- Contas a Pagar -->
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-title">🧾 Contas a Pagar</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6">Organize as despesas do seu negócio — água, internet, aluguel da sala, etc.</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <input class="form-input" id="conta-pagar-item" type="text" placeholder="Nome da conta (ex: Água)" style="flex:2;font-size:13px"/>
+          <input class="form-input" id="conta-pagar-valor" type="number" step="0.01" inputmode="decimal" placeholder="Valor" style="flex:1;font-size:13px"/>
+        </div>
+        <button class="btn btn-primary btn-full btn-sm" onclick="addContaPagar()">➕ Adicionar conta</button>
+        <div id="contas-pagar-resumo" style="display:flex;gap:10px;margin-top:12px"></div>
+        <div id="contas-pagar-list" style="margin-top:6px"></div>
+      </div>
 
       <!-- Gráfico barras mensais -->
       <div class="card" style="margin-bottom:14px">
@@ -4893,6 +4907,84 @@ async function importarBackup(event) {
 }
 
 // ══════════════════════════════════════════
+// 🧾 Contas a Pagar — lembrete de despesas do negócio
+// (água, luz, internet, aluguel da sala, etc.)
+// ══════════════════════════════════════════
+let contasPagar = JSON.parse(localStorage.getItem('fp_contas_pagar') || '[]');
+function saveContasPagar() { localStorage.setItem('fp_contas_pagar', JSON.stringify(contasPagar)); }
+function fmtContaPagar(v) { return `R$ ${v.toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.')}`; }
+
+function addContaPagar() {
+  const itemEl = document.getElementById('conta-pagar-item');
+  const valorEl = document.getElementById('conta-pagar-valor');
+  const item = itemEl.value.trim();
+  const valor = parseFloat(valorEl.value);
+  if (!item) { toast('⚠️ Escreva o nome da conta'); return; }
+  if (!valor || valor <= 0) { toast('⚠️ Informe um valor válido'); return; }
+  contasPagar.unshift({ id: uid(), item, valor, status: 'pendente', ts: new Date().toISOString() });
+  saveContasPagar();
+  itemEl.value = ''; valorEl.value = '';
+  renderContasPagar();
+  toast('✅ Conta adicionada');
+}
+
+function toggleStatusContaPagar(id) {
+  const c = contasPagar.find(c => c.id === id);
+  if (!c) return;
+  c.status = c.status === 'pendente' ? 'pago' : 'pendente';
+  saveContasPagar();
+  renderContasPagar();
+}
+
+async function deleteContaPagar(id) {
+  const ok = await showConfirm('🗑', 'Excluir conta?', 'Esta ação não pode ser desfeita.', 'Excluir');
+  if (!ok) return;
+  contasPagar = contasPagar.filter(c => c.id !== id);
+  saveContasPagar();
+  renderContasPagar();
+}
+
+function renderContasPagar() {
+  const resumoEl = document.getElementById('contas-pagar-resumo');
+  const listEl = document.getElementById('contas-pagar-list');
+  if (!resumoEl || !listEl) return;
+
+  const pendentes = contasPagar.filter(c => c.status === 'pendente');
+  const pagas = contasPagar.filter(c => c.status === 'pago');
+  const totalPendente = pendentes.reduce((acc,c) => acc + parseFloat(c.valor||0), 0);
+  const totalPago = pagas.reduce((acc,c) => acc + parseFloat(c.valor||0), 0);
+
+  resumoEl.innerHTML = !contasPagar.length ? '' : `
+    <div style="flex:1;background:var(--card2);border-radius:10px;padding:10px;text-align:center">
+      <div style="font-size:16px;font-weight:800;color:var(--red)">${fmtContaPagar(totalPendente)}</div>
+      <div style="font-size:10px;color:var(--text3)">pendente (${pendentes.length})</div>
+    </div>
+    <div style="flex:1;background:var(--card2);border-radius:10px;padding:10px;text-align:center">
+      <div style="font-size:16px;font-weight:800;color:var(--accent)">${fmtContaPagar(totalPago)}</div>
+      <div style="font-size:10px;color:var(--text3)">pago (${pagas.length})</div>
+    </div>`;
+
+  if (!contasPagar.length) {
+    listEl.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:8px 0;text-align:center">Nenhuma conta cadastrada ainda.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = contasPagar.map(c => {
+    const pago = c.status === 'pago';
+    return `
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;${pago?'text-decoration:line-through;color:var(--text3)':''}">${c.item}</div>
+        <div style="font-size:11.5px;color:var(--text2);margin-top:1px">${fmtContaPagar(parseFloat(c.valor||0))}</div>
+      </div>
+      <button onclick="toggleStatusContaPagar('${c.id}')" style="flex-shrink:0;border:1px solid ${pago?'rgba(76,128,88,.4)':'rgba(255,160,60,.4)'};background:${pago?'rgba(76,128,88,.12)':'rgba(255,160,60,.12)'};color:${pago?'#4c8058':'#ffa03c'};border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">${pago?'✅ Pago':'⏳ Pendente'}</button>
+      <button onclick="deleteContaPagar('${c.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;flex-shrink:0">✕</button>
+    </div>`;
+  }).join('');
+}
+
+
+// ══════════════════════════════════════════
 // FASE 1 · Captura Rápida de Treino
 // ══════════════════════════════════════════
 let notasRapidas = JSON.parse(localStorage.getItem('fp_notas_rapidas') || '[]');
@@ -5526,15 +5618,18 @@ function sbStatusCard() {
 let isAdmin = false;
 
 async function checkAdminAccess() {
-  if (!currentUser) { isAdmin = false; return; }
+  if (!currentUser) { isAdmin = false; dbg('checkAdminAccess: sem currentUser'); return; }
   try {
     const { data, error } = await sb.rpc('am_i_admin');
+    dbg('am_i_admin → data=' + JSON.stringify(data) + ' error=' + (error ? error.message : 'null'));
     isAdmin = !error && data === true;
   } catch (e) {
+    dbg('am_i_admin → exceção: ' + e.message);
     isAdmin = false;
   }
   const card = document.getElementById('admin-panel-card');
   if (card) card.style.display = isAdmin ? 'block' : 'none';
+  dbg('isAdmin final = ' + isAdmin);
   if (isAdmin) loadAdminStats();
 }
 
@@ -6277,6 +6372,7 @@ function renderResumoRapidoNegocio() {
 
 function renderDashboard() {
   renderResumoRapidoNegocio();
+  renderContasPagar();
   const now = new Date();
   const thisYear = now.getFullYear();
   const thisMonth = now.getMonth();
