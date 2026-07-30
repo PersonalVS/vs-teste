@@ -1281,6 +1281,7 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
         <div style="color:var(--blue);font-size:18px">›</div>
       </div>
       <div id="birthday-alert-home" style="display:none"></div>
+      <div id="contas-alert-home" style="display:none"></div>
       <div id="pay-alert-home" style="display:none"></div>
       <div class="stats-row" id="stats-row"></div>
       <div class="search-wrap">
@@ -1912,6 +1913,10 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
           <input class="form-input" id="conta-pagar-item" type="text" placeholder="Nome da conta (ex: Água)" style="flex:2;font-size:13px"/>
           <input class="form-input" id="conta-pagar-valor" type="number" step="0.01" inputmode="decimal" placeholder="Valor" style="flex:1;font-size:13px"/>
         </div>
+        <div style="margin-bottom:10px">
+          <label class="form-label" style="font-size:11px">Data de pagamento / vencimento</label>
+          <input class="form-input" id="conta-pagar-data" type="date" style="font-size:13px"/>
+        </div>
         <button class="btn btn-primary btn-full btn-sm" onclick="addContaPagar()">➕ Adicionar conta</button>
         <div id="contas-pagar-resumo" style="display:flex;gap:10px;margin-top:12px"></div>
         <div id="contas-pagar-list" style="margin-top:6px"></div>
@@ -2522,7 +2527,7 @@ function goBack() {
 // ══════════════════════════════════════════
 // HOME
 // ══════════════════════════════════════════
-function renderHome() { renderBirthdayAlertHome(); renderPayAlertHome(); renderStats(); renderStudentList(); }
+function renderHome() { renderBirthdayAlertHome(); renderContasAlertHome(); renderPayAlertHome(); renderStats(); renderStudentList(); }
 
 // ══════════════════════════════════════════
 // 🎂 Lembrete de aniversário (tela inicial)
@@ -4914,17 +4919,28 @@ let contasPagar = JSON.parse(localStorage.getItem('fp_contas_pagar') || '[]');
 function saveContasPagar() { localStorage.setItem('fp_contas_pagar', JSON.stringify(contasPagar)); }
 function fmtContaPagar(v) { return `R$ ${v.toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.')}`; }
 
+// Retorna quantos dias faltam até a data (negativo = já venceu)
+function diasAteVencimentoConta(dataVenc) {
+  if (!dataVenc) return null;
+  const d = new Date(dataVenc+'T00:00:00');
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.round((d - today) / 86400000);
+}
+
 function addContaPagar() {
   const itemEl = document.getElementById('conta-pagar-item');
   const valorEl = document.getElementById('conta-pagar-valor');
+  const dataEl = document.getElementById('conta-pagar-data');
   const item = itemEl.value.trim();
   const valor = parseFloat(valorEl.value);
+  const dataVencimento = dataEl.value || null;
   if (!item) { toast('⚠️ Escreva o nome da conta'); return; }
   if (!valor || valor <= 0) { toast('⚠️ Informe um valor válido'); return; }
-  contasPagar.unshift({ id: uid(), item, valor, status: 'pendente', ts: new Date().toISOString() });
+  contasPagar.unshift({ id: uid(), item, valor, dataVencimento, status: 'pendente', ts: new Date().toISOString() });
   saveContasPagar();
-  itemEl.value = ''; valorEl.value = '';
+  itemEl.value = ''; valorEl.value = ''; dataEl.value = '';
   renderContasPagar();
+  renderContasAlertHome();
   toast('✅ Conta adicionada');
 }
 
@@ -4934,6 +4950,7 @@ function toggleStatusContaPagar(id) {
   c.status = c.status === 'pendente' ? 'pago' : 'pendente';
   saveContasPagar();
   renderContasPagar();
+  renderContasAlertHome();
 }
 
 async function deleteContaPagar(id) {
@@ -4942,6 +4959,7 @@ async function deleteContaPagar(id) {
   contasPagar = contasPagar.filter(c => c.id !== id);
   saveContasPagar();
   renderContasPagar();
+  renderContasAlertHome();
 }
 
 function renderContasPagar() {
@@ -4969,19 +4987,106 @@ function renderContasPagar() {
     return;
   }
 
-  listEl.innerHTML = contasPagar.map(c => {
+  // Ordena: pendentes primeiro (mais próximas do vencimento primeiro), pagas por último
+  const ordenadas = [...contasPagar].sort((a,b) => {
+    if (a.status !== b.status) return a.status === 'pendente' ? -1 : 1;
+    const da = diasAteVencimentoConta(a.dataVencimento);
+    const db = diasAteVencimentoConta(b.dataVencimento);
+    if (da === null && db === null) return 0;
+    if (da === null) return 1;
+    if (db === null) return -1;
+    return da - db;
+  });
+
+  listEl.innerHTML = ordenadas.map(c => {
     const pago = c.status === 'pago';
+    const dias = diasAteVencimentoConta(c.dataVencimento);
+    let dataLabel = '';
+    let dataCor = 'var(--text2)';
+    if (c.dataVencimento) {
+      const dataFmt = new Date(c.dataVencimento+'T00:00:00').toLocaleDateString('pt-BR');
+      if (!pago && dias !== null) {
+        if (dias < 0)      { dataLabel = `Venceu em ${dataFmt}`; dataCor = 'var(--red)'; }
+        else if (dias === 0){ dataLabel = `Vence hoje`;           dataCor = 'var(--red)'; }
+        else if (dias <= 2) { dataLabel = `Vence em ${dias} dia${dias>1?'s':''} · ${dataFmt}`; dataCor = '#ffa03c'; }
+        else                { dataLabel = `Vence em ${dataFmt}`; }
+      } else {
+        dataLabel = dataFmt;
+      }
+    }
     return `
     <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:700;${pago?'text-decoration:line-through;color:var(--text3)':''}">${c.item}</div>
-        <div style="font-size:11.5px;color:var(--text2);margin-top:1px">${fmtContaPagar(parseFloat(c.valor||0))}</div>
+        <div style="font-size:11.5px;color:var(--text2);margin-top:1px">${fmtContaPagar(parseFloat(c.valor||0))}${dataLabel ? ` · <span style="color:${dataCor}">${dataLabel}</span>` : ''}</div>
       </div>
       <button onclick="toggleStatusContaPagar('${c.id}')" style="flex-shrink:0;border:1px solid ${pago?'rgba(76,128,88,.4)':'rgba(255,160,60,.4)'};background:${pago?'rgba(76,128,88,.12)':'rgba(255,160,60,.12)'};color:${pago?'#4c8058':'#ffa03c'};border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">${pago?'✅ Pago':'⏳ Pendente'}</button>
       <button onclick="deleteContaPagar('${c.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;flex-shrink:0">✕</button>
     </div>`;
   }).join('');
 }
+
+// Card de alerta na tela inicial — contas pendentes que vencem hoje,
+// já venceram, ou vencem nos próximos 2 dias
+function renderContasAlertHome() {
+  const el = document.getElementById('contas-alert-home');
+  if (!el) return;
+
+  const proximas = contasPagar
+    .filter(c => c.status === 'pendente')
+    .map(c => ({ c, dias: diasAteVencimentoConta(c.dataVencimento) }))
+    .filter(x => x.dias !== null && x.dias <= 2)
+    .sort((a,b) => a.dias - b.dias);
+
+  if (!proximas.length) { el.style.display = 'none'; return; }
+
+  const itensHtml = proximas.map(({c, dias}) => {
+    const label = dias < 0 ? `Venceu há ${Math.abs(dias)} dia${Math.abs(dias)>1?'s':''}` : dias === 0 ? '🔴 Vence hoje' : dias === 1 ? 'Vence amanhã' : 'Vence em 2 dias';
+    return `
+    <div style="display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-top:6px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.item}</div>
+        <div style="font-size:10.5px;color:${dias<=0?'#ff6b6b':'#ffa03c'};margin-top:1px">${label} · ${fmtContaPagar(parseFloat(c.valor||0))}</div>
+      </div>
+      <button class="btn btn-sm btn-outline" style="flex-shrink:0;padding:6px 10px;font-size:11px" onclick="event.stopPropagation(); toggleStatusContaPagar('${c.id}'); renderContasAlertHome();">✅ Marcar pago</button>
+    </div>`;
+  }).join('');
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="background:rgba(255,160,60,.1);border:1px solid rgba(255,160,60,.35);border-radius:13px;padding:12px 14px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:11px">
+        <div style="font-size:22px">🧾</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;color:#ffa03c">${proximas.length} conta${proximas.length!==1?'s':''} a pagar</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">Vencendo hoje ou nos próximos 2 dias</div>
+        </div>
+      </div>
+      ${itensHtml}
+    </div>`;
+}
+
+function scheduleContasPagarNotifications() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  contasPagar.filter(c => c.status === 'pendente').forEach(c => {
+    const dias = diasAteVencimentoConta(c.dataVencimento);
+    if (dias === null) return;
+    if (dias === 0) {
+      setTimeout(() => {
+        new Notification('🔴 PersonalVS — Conta vence hoje!', {
+          body: `${c.item} (${fmtContaPagar(parseFloat(c.valor||0))}) vence hoje.`,
+        });
+      }, 6000);
+    } else if (dias === 2) {
+      setTimeout(() => {
+        new Notification('🧾 PersonalVS — Conta vencendo', {
+          body: `${c.item} (${fmtContaPagar(parseFloat(c.valor||0))}) vence em 2 dias.`,
+        });
+      }, 6500);
+    }
+  });
+}
+
 
 
 // ══════════════════════════════════════════
@@ -5882,6 +5987,7 @@ async function requestNotifPermission() {
     document.getElementById('notif-banner-home').style.display = 'none';
     schedulePaymentNotifications();
     scheduleBirthdayNotifications();
+    scheduleContasPagarNotifications();
   } else {
     toast('❌ Permissão negada. Ative nas configurações do navegador.');
   }
@@ -6810,6 +6916,7 @@ async function bootApp() {
   if ('Notification' in window && Notification.permission === 'granted') {
     schedulePaymentNotifications();
     scheduleBirthdayNotifications();
+    scheduleContasPagarNotifications();
   }
   checkOnboarding();
 }
