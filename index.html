@@ -81,6 +81,11 @@ function applyKeyToMemory(key, value) {
 const _syncTimers = {};
 const SYNC_DEBOUNCE_MS = 500;
 
+// Guarda uma "foto" do que já está confirmado na nuvem pra cada aluno
+// (id -> JSON string). Assim, ao sincronizar, só reenviamos quem
+// realmente mudou desde a última vez — não a lista inteira.
+let _lastSyncedSnapshot = {};
+
 // Grava no localStorage SEM disparar sincronização — usado quando o
 // próprio dado já veio da nuvem (evita ping-pong de sync inútil).
 function setLocalNoSync(key, value) {
@@ -126,20 +131,26 @@ function queueStudentsSync() {
 
 async function flushStudentsSync() {
   if (!currentUser) return;
+
+  // Descobre só quem mudou de verdade desde a última sincronização —
+  // evita reenviar todo mundo quando só 1 aluno foi editado.
+  const alterados = students.filter(s => {
+    const atual = JSON.stringify(s);
+    return _lastSyncedSnapshot[s.id] !== atual;
+  });
+
+  if (!alterados.length) { setSyncStatus('__students__', 'ok'); return; }
+
   setSyncStatus('__students__', 'syncing');
   try {
-    if (students.length) {
-      const nowIso = new Date().toISOString();
-      // Envia todos os alunos em paralelo (uma requisição pequena por aluno,
-      // mas todas ao mesmo tempo) — muito mais rápido que enviar um por um
-      // em sequência, e mais seguro que juntar tudo numa única requisição
-      // gigante (que pode estourar o limite de tamanho quando há fotos).
-      const resultados = await Promise.all(students.map(s =>
-        sb.from('students').upsert({ id: s.id, user_id: currentUser.id, data: s, updated_at: nowIso })
-      ));
-      const falhou = resultados.find(r => r.error);
-      if (falhou) throw new Error(falhou.error.message);
-    }
+    const nowIso = new Date().toISOString();
+    const resultados = await Promise.all(alterados.map(s =>
+      sb.from('students').upsert({ id: s.id, user_id: currentUser.id, data: s, updated_at: nowIso })
+    ));
+    const falhou = resultados.find(r => r.error);
+    if (falhou) throw new Error(falhou.error.message);
+
+    alterados.forEach(s => { _lastSyncedSnapshot[s.id] = JSON.stringify(s); });
     setSyncStatus('__students__', 'ok');
   } catch(e) {
     dbg && dbg('flushStudentsSync falhou: ' + e.message);
@@ -2990,6 +3001,7 @@ async function deleteStudent(e, id) {
   const ok = await showConfirm('🗑','Remover aluno?',`Remover "${s.name}"? Esta ação não pode ser desfeita.`,'Remover');
   if (!ok) return;
   students = students.filter(x => x.id !== id);
+  delete _lastSyncedSnapshot[id];
   save(); toast('🗑 Aluno removido'); renderHome();
 
   if (!currentUser) return;
@@ -5899,6 +5911,10 @@ async function sbPull() {
     // conta testada antes no mesmo aparelho/navegador.
     students = (data || []).map(r => r.data);
     setLocalNoSync('fp_v6', JSON.stringify(students));
+    // Marca todo mundo como "já sincronizado" nesse ponto — evita reenviar
+    // tudo de novo por engano logo depois de um pull.
+    _lastSyncedSnapshot = {};
+    students.forEach(s => { _lastSyncedSnapshot[s.id] = JSON.stringify(s); });
 
     const { data: extras, error: e2 } = await sb.from('app_data').select('key,value').eq('user_id', currentUser.id);
     if (e2) throw new Error(e2.message);
