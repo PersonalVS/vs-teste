@@ -130,9 +130,15 @@ async function flushStudentsSync() {
   try {
     if (students.length) {
       const nowIso = new Date().toISOString();
-      const rows = students.map(s => ({ id: s.id, user_id: currentUser.id, data: s, updated_at: nowIso }));
-      const { error } = await sb.from('students').upsert(rows);
-      if (error) throw new Error(error.message);
+      // Envia todos os alunos em paralelo (uma requisição pequena por aluno,
+      // mas todas ao mesmo tempo) — muito mais rápido que enviar um por um
+      // em sequência, e mais seguro que juntar tudo numa única requisição
+      // gigante (que pode estourar o limite de tamanho quando há fotos).
+      const resultados = await Promise.all(students.map(s =>
+        sb.from('students').upsert({ id: s.id, user_id: currentUser.id, data: s, updated_at: nowIso })
+      ));
+      const falhou = resultados.find(r => r.error);
+      if (falhou) throw new Error(falhou.error.message);
     }
     setSyncStatus('__students__', 'ok');
   } catch(e) {
