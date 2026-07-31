@@ -79,7 +79,7 @@ function applyKeyToMemory(key, value) {
 }
 
 const _syncTimers = {};
-const SYNC_DEBOUNCE_MS = 1500;
+const SYNC_DEBOUNCE_MS = 500;
 
 // Grava no localStorage SEM disparar sincronização — usado quando o
 // próprio dado já veio da nuvem (evita ping-pong de sync inútil).
@@ -128,8 +128,10 @@ async function flushStudentsSync() {
   if (!currentUser) return;
   setSyncStatus('__students__', 'syncing');
   try {
-    for (const s of students) {
-      const { error } = await sb.from('students').upsert({ id: s.id, user_id: currentUser.id, data: s, updated_at: new Date().toISOString() });
+    if (students.length) {
+      const nowIso = new Date().toISOString();
+      const rows = students.map(s => ({ id: s.id, user_id: currentUser.id, data: s, updated_at: nowIso }));
+      const { error } = await sb.from('students').upsert(rows);
       if (error) throw new Error(error.message);
     }
     setSyncStatus('__students__', 'ok');
