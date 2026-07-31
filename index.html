@@ -49,7 +49,7 @@ let currentUser = null; // preenchido depois do login
 const SYNC_KEYS = new Set([
   'fp_attendance', 'fp_schedule', 'fp_notas_rapidas', 'fp_aulas_repor',
   'fp_falta_motivos', 'fp_lista_espera', 'fp_horario_trabalho',
-  'fp_mvp_fases', 'fp_apresentacao', 'fp_dash_hist',
+  'fp_mvp_fases', 'fp_dash_hist',
   'fp_cartao_contato', 'fp_contas_pagar', 'fp_planejamento',
 ]);
 
@@ -60,7 +60,7 @@ const SYNC_KEYS = new Set([
 const SYNC_DEFAULTS = {
   fp_attendance: {}, fp_schedule: {}, fp_notas_rapidas: [], fp_aulas_repor: [],
   fp_falta_motivos: {}, fp_lista_espera: [], fp_horario_trabalho: null,
-  fp_mvp_fases: {}, fp_apresentacao: null, fp_dash_hist: {},
+  fp_mvp_fases: {}, fp_dash_hist: {},
   fp_cartao_contato: '', fp_contas_pagar: [], fp_planejamento: [],
 };
 
@@ -74,7 +74,6 @@ function applyKeyToMemory(key, value) {
   if (key === 'fp_aulas_repor')    aulasARepor        = value || [];
   if (key === 'fp_lista_espera')   listaEspera        = value || [];
   if (key === 'fp_notas_rapidas')  notasRapidas       = value || [];
-  if (key === 'fp_apresentacao')   apresentacaoSlides = value || APRESENTACAO_DEFAULT;
   if (key === 'fp_contas_pagar')   contasPagar        = value || [];
   if (key === 'fp_planejamento')   planejamentoItems  = value || [];
 }
@@ -1693,9 +1692,6 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
       <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:17px;margin-bottom:3px">🎯 Fases do Negócio</div>
       <div style="font-size:13px;color:var(--text2);margin-bottom:16px">Metodologia MVP — evolua o app em 3 etapas, na sua velocidade</div>
 
-      <!-- Modo Apresentação (botão à parte, fora da estrutura de fases) -->
-      <button class="btn btn-primary btn-full" style="margin-bottom:18px;padding:14px" onclick="showNav('apresentacao')">🖥️ Modo Apresentação — mostrar pra um lead</button>
-
       <!-- ══ FASE 1 ══ -->
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -1858,22 +1854,9 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
       </div>
     </div>
 
-    <!-- ══ MODO APRESENTAÇÃO ══ -->
-    <div class="screen" id="screen-apresentacao">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-        <button class="btn btn-ghost" style="font-size:11px;padding:6px 10px" onclick="editarApresentacao()">✏️ Editar conteúdo</button>
-      </div>
-      <div id="apresentacao-slide" style="min-height:60vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:linear-gradient(135deg,var(--surface),var(--card2));border-radius:22px;padding:36px 24px;border:1px solid var(--border)"></div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px">
-        <button class="btn btn-ghost" style="font-size:13px;padding:10px 16px" onclick="apresentacaoNav(-1)">◀ Anterior</button>
-        <div id="apresentacao-dots" style="display:flex;gap:6px"></div>
-        <button class="btn btn-ghost" style="font-size:13px;padding:10px 16px" onclick="apresentacaoNav(1)">Próximo ▶</button>
-      </div>
-    </div>
-
     <!-- ══ PLANEJAMENTO ══ -->
     <div class="screen" id="screen-planejamento">
-      <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:17px;margin-bottom:3px">🎯 Planejamento</div>
+      <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:17px;margin-bottom:3px">🧭 Planejamento</div>
       <div style="font-size:13px;color:var(--text2);margin-bottom:16px">Guarde ideias e projetos pra sua carreira — cursos, especializações, novos serviços, o que vier.</div>
 
       <div class="card" style="margin-bottom:14px">
@@ -2121,7 +2104,7 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
     <div class="nav-item"        id="nav-dashboard"    onclick="showNav('dashboard')">  <div class="nav-icon">📊</div><div>Finanças</div>   <div class="nav-dot"></div></div>
     <div class="nav-item"        id="nav-fases"        onclick="showNav('fases')">      <div class="nav-icon">🎯</div><div>Fases</div>       <div class="nav-dot"></div></div>
     <div class="nav-item"        id="nav-supabase"     onclick="showNav('supabase')">   <div class="nav-icon">☁️</div><div>Nuvem</div>      <div class="nav-dot"></div></div>
-    <div class="nav-item"        id="nav-planejamento" onclick="showNav('planejamento')"><div class="nav-icon">🎯</div><div>Planos</div>     <div class="nav-dot"></div></div>
+    <div class="nav-item"        id="nav-planejamento" onclick="showNav('planejamento')"><div class="nav-icon">🧭</div><div>Planos</div>     <div class="nav-dot"></div></div>
   </nav>
 </div>
 
@@ -2562,14 +2545,12 @@ function showNav(tab) {
   else if (tab === 'supabase') { document.getElementById('nav-supabase').classList.add('active'); showScreen('supabase'); }
   else if (tab === 'planejamento') { document.getElementById('nav-planejamento').classList.add('active'); showScreen('planejamento'); initPlanejamentoScreen(); }
   else if (tab === 'nutri') { showScreen('nutri'); }
-  else if (tab === 'apresentacao') { showScreen('apresentacao'); document.getElementById('top-title').textContent = 'Modo Apresentação'; renderApresentacao(); }
 }
 function goBack() {
   if (currentScreen === 'progress') showStudentDetail(selectedStudentId);
   else if (currentScreen === 'photos') showStudentDetail(selectedStudentId);
   else if (currentScreen === 'detail') showNav('home');
   else if (currentScreen === 'form') selectedStudentId ? showStudentDetail(selectedStudentId) : showNav('home');
-  else if (currentScreen === 'apresentacao') showNav('fases');
   else showNav('home');
 }
 
@@ -4453,102 +4434,6 @@ async function excluirPlanejamentoItem() {
 }
 
 // ══════════════════════════════════════════
-// FASE 3 · Modo Apresentação
-// ══════════════════════════════════════════
-const APRESENTACAO_DEFAULT = [
-  { titulo: 'Victor Saraiva', corpo: 'Treinamento Funcional & Longevidade' },
-  { titulo: 'Por que treinar comigo', corpo: '• CREF ativo, especialista em fisiologia e gerontologia\n• Atendimento 100% personalizado, sem fila de academia\n• Foco em autonomia, mobilidade e prevenção de quedas' },
-  { titulo: 'Como funciona', corpo: 'Atendimento domiciliar ou no espaço de lazer do condomínio, em horário fixo semanal — sem custo de estrutura pra você.' },
-  { titulo: 'Resultados', corpo: 'Alunos relatam mais força, equilíbrio e disposição em poucas semanas, com acompanhamento clínico de verdade — não só uma planilha de treino.' },
-];
-let apresentacaoSlides = JSON.parse(localStorage.getItem('fp_apresentacao') || 'null') || APRESENTACAO_DEFAULT;
-let apresentacaoIndex = 0;
-
-function totalSlidesApresentacao() { return apresentacaoSlides.length + 1; } // +1 = QR slide fixo no final
-
-async function renderApresentacao() {
-  apresentacaoIndex = Math.max(0, Math.min(totalSlidesApresentacao()-1, apresentacaoIndex));
-  const el = document.getElementById('apresentacao-slide');
-  const dotsEl = document.getElementById('apresentacao-dots');
-  if (!el) return;
-
-  dotsEl.innerHTML = Array.from({length: totalSlidesApresentacao()}).map((_,i) =>
-    `<div style="width:7px;height:7px;border-radius:50%;background:${i===apresentacaoIndex?'var(--accent)':'var(--border2)'}"></div>`
-  ).join('');
-
-  if (apresentacaoIndex < apresentacaoSlides.length) {
-    const slide = apresentacaoSlides[apresentacaoIndex];
-    const isCover = apresentacaoIndex === 0;
-    el.innerHTML = `
-      ${isCover ? `<img src="data:image/png;base64,${LOGO_ICON_B64}" style="width:72px;margin-bottom:16px"/>` : ''}
-      <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:${isCover?'24px':'19px'};color:var(--text);margin-bottom:14px">${slide.titulo}</div>
-      <div style="font-size:14px;color:var(--text2);line-height:1.7;white-space:pre-line;max-width:320px">${slide.corpo}</div>`;
-  } else {
-    // Slide final: QR + CTA
-    const contato = localStorage.getItem('fp_cartao_contato') || 'https://instagram.com/victosaraiva_personal';
-    el.innerHTML = `<div style="font-size:13px;color:var(--text3)">Gerando QR Code...</div>`;
-    if (typeof QRCode !== 'undefined') {
-      try {
-        const qrDataUrl = await QRCode.toDataURL(contato, { width: 220, margin: 1, color: { dark: '#2f3e36', light: '#f4efe3' } });
-        el.innerHTML = `
-          <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:19px;color:var(--text);margin-bottom:16px">Vamos conversar?</div>
-          <div style="background:#f4efe3;border-radius:16px;padding:14px;margin-bottom:14px"><img src="${qrDataUrl}" style="width:170px;height:170px;display:block"/></div>
-          <div style="font-size:13px;color:var(--text2)">Aponte a câmera do celular<br/>pra falar comigo agora</div>`;
-      } catch (e) {
-        el.innerHTML = `<div style="font-size:13px;color:var(--text3)">Não foi possível gerar o QR Code.</div>`;
-      }
-    }
-  }
-}
-function apresentacaoNav(dir) {
-  apresentacaoIndex = Math.max(0, Math.min(totalSlidesApresentacao()-1, apresentacaoIndex + dir));
-  renderApresentacao();
-}
-function editarApresentacao() {
-  const modalHtml = `
-    <div id="apres-modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;display:flex;align-items:flex-end;backdrop-filter:blur(4px)" onclick="closeApresModal(event)">
-      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:22px 22px 0 0;padding:22px 16px calc(env(safe-area-inset-bottom,0px)+22px);width:100%;max-height:85vh;overflow-y:auto;animation:slideUp .28s ease">
-        <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:16px;margin-bottom:16px">✏️ Editar Apresentação</div>
-        ${apresentacaoSlides.map((s,i) => `
-          <div style="margin-bottom:16px">
-            <label class="form-label">Slide ${i+1} — Título</label>
-            <input class="form-input" id="apres-titulo-${i}" value="${s.titulo.replace(/"/g,'&quot;')}" style="margin-bottom:8px"/>
-            <label class="form-label">Texto</label>
-            <textarea class="form-textarea" id="apres-corpo-${i}" rows="3">${s.corpo}</textarea>
-          </div>`).join('')}
-        <div style="margin-bottom:16px">
-          <label class="form-label">Contato pro último slide (WhatsApp ou link)</label>
-          <input class="form-input" id="apres-contato" value="${(localStorage.getItem('fp_cartao_contato')||'').replace(/"/g,'&quot;')}" placeholder="Ex: https://wa.me/5585999999999"/>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:16px">💡 O último slide (QR Code) aponta pra esse contato.</div>
-        <div class="btn-row">
-          <button class="btn btn-ghost" onclick="closeApresModal()">Cancelar</button>
-          <button class="btn btn-primary" style="flex:1" onclick="salvarApresentacao()">Salvar</button>
-        </div>
-      </div>
-    </div>`;
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
-function closeApresModal(e) {
-  const overlay = document.getElementById('apres-modal-overlay');
-  if (!overlay) return;
-  if (e && e.target !== overlay) return;
-  overlay.remove();
-}
-function salvarApresentacao() {
-  apresentacaoSlides = apresentacaoSlides.map((s,i) => ({
-    titulo: document.getElementById('apres-titulo-'+i).value.trim() || s.titulo,
-    corpo: document.getElementById('apres-corpo-'+i).value.trim() || s.corpo,
-  }));
-  localStorage.setItem('fp_apresentacao', JSON.stringify(apresentacaoSlides));
-  localStorage.setItem('fp_cartao_contato', document.getElementById('apres-contato').value.trim());
-  closeApresModal();
-  apresentacaoIndex = 0;
-  renderApresentacao();
-  toast('✅ Apresentação atualizada!');
-}
-
-// ══════════════════════════════════════════
 // FASE 1 · Agenda inteligente (hoje)
 // ══════════════════════════════════════════
 function renderHojeObjetivos() {
@@ -5877,7 +5762,6 @@ async function doDeleteAccountData() {
   aulasARepor = [];
   listaEspera = [];
   notasRapidas = [];
-  apresentacaoSlides = APRESENTACAO_DEFAULT;
   localStorage.clear();
   toast('✅ Sua conta e seus dados foram apagados.');
   await sb.auth.signOut();
