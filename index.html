@@ -102,7 +102,7 @@ function queueSync(key) {
 }
 
 async function flushSyncKey(key) {
-  if (!currentUser) return;
+  if (!currentUser) return true;
   const raw = localStorage.getItem(key);
   let value = null;
   try { value = raw === null ? null : JSON.parse(raw); } catch(e) { value = raw; }
@@ -113,12 +113,14 @@ async function flushSyncKey(key) {
     );
     if (error) throw new Error(error.message);
     setSyncStatus(key, 'ok');
+    return true;
   } catch(e) {
     dbg && dbg('flushSyncKey(' + key + ') falhou: ' + e.message);
     setSyncStatus(key, 'error');
     // tenta de novo em breve — não perde a alteração silenciosamente
     clearTimeout(_syncTimers[key]);
     _syncTimers[key] = setTimeout(() => flushSyncKey(key), 8000);
+    return false;
   }
 }
 
@@ -130,7 +132,7 @@ function queueStudentsSync() {
 }
 
 async function flushStudentsSync() {
-  if (!currentUser) return;
+  if (!currentUser) return true;
 
   // Descobre só quem mudou de verdade desde a última sincronização —
   // evita reenviar todo mundo quando só 1 aluno foi editado.
@@ -139,7 +141,7 @@ async function flushStudentsSync() {
     return _lastSyncedSnapshot[s.id] !== atual;
   });
 
-  if (!alterados.length) { setSyncStatus('__students__', 'ok'); return; }
+  if (!alterados.length) { setSyncStatus('__students__', 'ok'); return true; }
 
   setSyncStatus('__students__', 'syncing');
   try {
@@ -152,11 +154,13 @@ async function flushStudentsSync() {
 
     alterados.forEach(s => { _lastSyncedSnapshot[s.id] = JSON.stringify(s); });
     setSyncStatus('__students__', 'ok');
+    return true;
   } catch(e) {
     dbg && dbg('flushStudentsSync falhou: ' + e.message);
     setSyncStatus('__students__', 'error');
     clearTimeout(_syncTimers.__students__);
     _syncTimers.__students__ = setTimeout(flushStudentsSync, 8000);
+    return false;
   }
 }
 
@@ -5701,7 +5705,8 @@ async function flushAllPendingSyncNow() {
   Object.values(_syncTimers).forEach(t => clearTimeout(t));
   const tasks = [flushStudentsSync()];
   SYNC_KEYS.forEach(key => tasks.push(flushSyncKey(key)));
-  await Promise.all(tasks);
+  const resultados = await Promise.all(tasks);
+  return resultados.every(ok => ok !== false);
 }
 
 // Abre o WhatsApp com uma mensagem pré-montada, já identificando quem
@@ -5718,7 +5723,20 @@ function enviarFeedback() {
 async function doSignOut() {
   if (!confirm('Sair da sua conta neste dispositivo?')) return;
   toast('☁️ Salvando alterações antes de sair...');
-  await flushAllPendingSyncNow();
+  const tudoSalvo = await flushAllPendingSyncNow();
+  if (!tudoSalvo) {
+    const tentarDeNovo = confirm(
+      '⚠️ Não foi possível confirmar que todas as alterações foram salvas na nuvem (parece problema de conexão).\n\n' +
+      'Se você sair agora, o que ainda não sincronizou pode ser perdido neste aparelho.\n\n' +
+      'Toque em OK pra tentar salvar de novo, ou Cancelar pra sair mesmo assim.'
+    );
+    if (tentarDeNovo) {
+      toast('☁️ Tentando salvar de novo...');
+      await flushAllPendingSyncNow();
+      return; // não sai ainda — deixa o usuário conferir e tentar "Sair" de novo
+    }
+    // usuário escolheu "Cancelar" = sair mesmo assim, sem tudo confirmado
+  }
   await sb.auth.signOut();
 }
 
