@@ -186,6 +186,10 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushAllPendingSync();
 });
 window.addEventListener('beforeunload', flushAllPendingSync);
+// 'pagehide' é bem mais confiável que 'beforeunload' em Safari/iOS,
+// principalmente com o app instalado na tela inicial (PWA) — é o que
+// mais garante que a última alteração saia antes do app ser suspenso.
+window.addEventListener('pagehide', flushAllPendingSync);
 
 // Estado individual de cada "gaveta" de sincronização (alunos +
 // cada chave de SYNC_KEYS). O ícone mostrado é sempre calculado a
@@ -1706,6 +1710,7 @@ html.pwa-standalone #auth-screen{padding-top:58px !important}
 
       <div class="card" style="margin-top:13px">
         <div class="card-title" style="color:#0f0">🐛 Debug Log</div>
+        <div style="font-size:11px;color:var(--accent);margin-bottom:6px">Versão do app: <b>2026.08.05-sync-fix</b></div>
         <div id="debug-log" style="display:none;max-height:200px;overflow-y:auto;font-family:monospace;padding:4px"></div>
         <div style="font-size:11px;color:var(--text3);margin-top:6px">Toque nos botões de sincronização acima e veja o log aqui</div>
       </div>
@@ -2392,6 +2397,7 @@ function markPaid(id) {
   s.paidUntil = proximo.toISOString().slice(0,10);
   s.payStatus = 'ok';
   save(); renderMensalidade(); renderHome(); renderStudentList();
+  clearTimeout(_syncTimers.__students__); flushStudentsSync(); // envia na hora, não espera o debounce
   toast(`✅ ${s.name} marcado como pago! Próx. vencimento: ${proximo.toLocaleDateString('pt-BR')}`);
 }
 
@@ -2403,6 +2409,7 @@ function markPending(id) {
   s.paidUntil = ontem.toISOString().slice(0,10);
   s.payStatus = 'late';
   save(); renderMensalidade(); renderHome(); renderStudentList();
+  clearTimeout(_syncTimers.__students__); flushStudentsSync(); // envia na hora, não espera o debounce
   toast(`⚠️ ${s.name} marcado como pendente`);
 }
 
@@ -3619,6 +3626,7 @@ function toggleAttendance(studentId, dk) {
     attendanceData[studentId][dk] = 'present';
     toast('✅ Presença registrada!');
     saveAttendance();
+    clearTimeout(_syncTimers.fp_attendance); flushSyncKey('fp_attendance'); // envia na hora
     renderAgenda();
   } else if (cur === 'present') {
     openFaltaModal(studentId, dk);
@@ -3628,6 +3636,7 @@ function toggleAttendance(studentId, dk) {
     if (faltaMotivos[studentId]) delete faltaMotivos[studentId][dk];
     saveFaltaMotivos();
     saveAttendance();
+    clearTimeout(_syncTimers.fp_attendance); flushSyncKey('fp_attendance'); // envia na hora
     aulasARepor = aulasARepor.filter(a => !(a.studentId === studentId && a.dataOriginal === dk));
     saveAulasARepor();
     toast('↩️ Marcação removida');
@@ -3690,6 +3699,7 @@ function confirmarFalta(studentId, dk) {
   const repor = document.getElementById('falta-repor').checked;
   attendanceData[studentId][dk] = 'absent';
   saveAttendance();
+  clearTimeout(_syncTimers.fp_attendance); flushSyncKey('fp_attendance'); // envia na hora
   if (!faltaMotivos[studentId]) faltaMotivos[studentId] = {};
   faltaMotivos[studentId][dk] = motivo;
   saveFaltaMotivos();
@@ -3857,6 +3867,7 @@ function saveSchedModal(studentId) {
   const objetivo = document.getElementById('sched-objetivo').value.trim();
   scheduleData[studentId] = { scheduledDays: window._schedDays.sort((a,b)=>a-b), time, objetivo };
   saveSchedule();
+  clearTimeout(_syncTimers.fp_schedule); flushSyncKey('fp_schedule'); // envia na hora
   closeSchedModal();
   toast('✅ Agenda salva!');
   renderAgenda();
@@ -5934,9 +5945,12 @@ async function sbPull() {
     _lastSyncedSnapshot = {};
     students.forEach(s => { _lastSyncedSnapshot[s.id] = JSON.stringify(s); });
 
-    const { data: extras, error: e2 } = await sb.from('app_data').select('key,value').eq('user_id', currentUser.id);
+    const { data: extras, error: e2 } = await sb.from('app_data').select('key,value,updated_at').eq('user_id', currentUser.id).order('updated_at', { ascending: true });
     if (e2) throw new Error(e2.message);
     const cloudMap = {};
+    // Se por algum motivo existir mais de uma linha pra mesma chave (não deveria,
+    // mas é uma proteção extra), a ordenação acima garante que a mais recente
+    // (processada por último) sempre vence.
     (extras || []).forEach(r => { cloudMap[r.key] = r.value; });
 
     // Cada chave sincronizável é resolvida a partir da nuvem — se essa
