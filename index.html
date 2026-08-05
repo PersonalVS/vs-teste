@@ -122,10 +122,18 @@ async function flushSyncKey(key) {
   try { value = raw === null ? null : JSON.parse(raw); } catch(e) { value = raw; }
   setSyncStatus(key, 'syncing');
   try {
-    const { error } = await sb.from('app_data').upsert(
-      { key, user_id: currentUser.id, value, updated_at: new Date().toISOString() }
-    );
-    if (error) throw new Error(error.message);
+    if (value === null) {
+      // "Sem configuração" — em vez de gravar um valor nulo (que a coluna
+      // não aceita), removemos a linha da nuvem. Ausência de linha já é
+      // tratada como "usar padrão" em qualquer lugar que lê isso de volta.
+      const { error } = await sb.from('app_data').delete().eq('key', key).eq('user_id', currentUser.id);
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await sb.from('app_data').upsert(
+        { key, user_id: currentUser.id, value, updated_at: new Date().toISOString() }
+      );
+      if (error) throw new Error(error.message);
+    }
     _dirtyKeys.delete(key); saveDirtyKeys();
     setSyncStatus(key, 'ok');
   } catch(e) {
@@ -5958,10 +5966,15 @@ async function pushDirtyBeforePull() {
     let value = null;
     try { value = raw === null ? null : JSON.parse(raw); } catch(e) { value = raw; }
     try {
-      const { error } = await sb.from('app_data').upsert(
-        { key, user_id: currentUser.id, value, updated_at: new Date().toISOString() }
-      );
-      if (error) throw new Error(error.message);
+      if (value === null) {
+        const { error } = await sb.from('app_data').delete().eq('key', key).eq('user_id', currentUser.id);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await sb.from('app_data').upsert(
+          { key, user_id: currentUser.id, value, updated_at: new Date().toISOString() }
+        );
+        if (error) throw new Error(error.message);
+      }
       _dirtyKeys.delete(key);
     } catch(e) { dbg && dbg('pushDirtyBeforePull(' + key + ') falhou: ' + e.message); erro = e.message; }
   }
